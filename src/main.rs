@@ -1,7 +1,13 @@
+use std::{
+    fmt::Debug,
+    path::{Path, PathBuf},
+};
+
+use clap::Parser;
 use macroquad::prelude::*;
 use rhai::{
     packages::{CorePackage, Package},
-    Engine,
+    CustomType, Engine, Scope, TypeBuilder, AST,
 };
 
 pub fn build_engine() -> Engine {
@@ -14,28 +20,59 @@ pub fn build_engine() -> Engine {
     engine.register_global_module(package.as_shared_module());
 
     engine
+        .build_type::<RaycastResult>()
+        .register_fn("to_debug", |r: RaycastResult| format!("{}", r.distance))
+        .register_fn("to_string", |r: RaycastResult| format!("{}", r.distance))
+        .build_type::<Micromouse>()
+        .build_type::<Sensors>()
+        .register_indexer_get(Sensors::get_sensors);
+
+    engine
 }
 
+#[derive(Clone, CustomType, Debug)]
+struct Sensors(#[rhai_type(skip)] [RaycastResult; 8]);
+
+impl Sensors {
+    fn get_sensors(&mut self, index: i64) -> RaycastResult {
+        self.0[index as usize]
+    }
+}
+
+#[derive(Clone, CustomType, Debug)]
 struct Micromouse {
-    sensors: [RaycastResult; 8],
+    #[rhai_type(readonly)]
+    sensors: Sensors,
+    #[rhai_type(skip)]
     position: Vec2,
-    direction: f32,      // Current direction in radians
-    left_power: f32,     // Power input to the left wheels (0 to 1)
-    right_power: f32,    // Power input to the right wheels (0 to 1)
-    left_velocity: f32,  // Current velocity of the left wheels
+    #[rhai_type(skip)]
+    direction: f32, // Current direction in radians
+    #[rhai_type(set = Micromouse::set_left_power)]
+    left_power: f32, // Power input to the left wheels (0 to 1)
+    #[rhai_type(set = Micromouse::set_right_power)]
+    right_power: f32, // Power input to the right wheels (0 to 1)
+    #[rhai_type(readonly)]
+    left_velocity: f32, // Current velocity of the left wheels
+    #[rhai_type(readonly)]
     right_velocity: f32, // Current velocity of the right wheels
-    max_speed: f32,      // Maximum speed of the mouse (units per second)
-    mass: f32,           // Mass of the mouse
-    wheel_base: f32,     // Distance between the two wheels
-    tire_friction: f32,  // Friction coefficient of the tires
-    width: f32,          // Width of the mouse
-    length: f32,         // Length of the mouse (not including the triangle)
+    #[rhai_type(readonly)]
+    max_speed: f32, // Maximum speed of the mouse (units per second)
+    #[rhai_type(readonly)]
+    mass: f32, // Mass of the mouse
+    #[rhai_type(readonly)]
+    wheel_base: f32, // Distance between the two wheels
+    #[rhai_type(readonly)]
+    tire_friction: f32, // Friction coefficient of the tires
+    #[rhai_type(readonly)]
+    width: f32, // Width of the mouse
+    #[rhai_type(readonly)]
+    length: f32, // Length of the mouse (not including the triangle)
 }
 
 impl Micromouse {
     fn new() -> Self {
         Self {
-            sensors: [Default::default(); 8],
+            sensors: Sensors([Default::default(); 8]),
             position: vec2(1.5, 1.5),
             direction: 0.0,
             left_power: 0.0,
@@ -51,9 +88,12 @@ impl Micromouse {
         }
     }
 
-    fn set_power(&mut self, left_power: f32, right_power: f32) {
-        self.left_power = left_power.clamp(-1.0, 1.0);
-        self.right_power = right_power.clamp(-1.0, 1.0);
+    fn set_left_power(&mut self, power: f32) {
+        self.left_power = power.clamp(-1.0, 1.0);
+    }
+
+    fn set_right_power(&mut self, power: f32) {
+        self.right_power = power.clamp(-1.0, 1.0);
     }
 
     fn update(&mut self, dt: f32, maze_friction: f32) {
@@ -130,20 +170,25 @@ struct CellWalls {
     west: bool,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, CustomType)]
 struct RaycastResult {
+    #[rhai_type(readonly)]
     distance: f32,
     hit_point: Vec2,
 }
 
 struct Simulation {
+    engine: Engine,
     mouse: Micromouse,
     maze: Maze,
     time_scale: f32, // Speed factor for the simulation and replay
+    ast: AST,
 }
 
 impl Simulation {
-    fn new(maze_width: usize, maze_height: usize) -> Self {
+    fn new<P: AsRef<Path>>(maze_width: usize, maze_height: usize, script: P) -> Self {
+        let engine = build_engine();
+        let ast = engine.compile_file(script.as_ref().to_path_buf()).unwrap();
         Self {
             mouse: Micromouse::new(),
             maze: Maze {
@@ -153,13 +198,24 @@ impl Simulation {
                 walls: vec![vec![CellWalls::default(); maze_height]; maze_width],
             },
             time_scale: 1.0,
+            engine,
+            ast,
         }
     }
 
     fn update(&mut self, dt: f32) {
         let dt_scaled = dt * self.time_scale;
 
-        self.mouse.sensors = self.raycast_from_edges(&self.mouse);
+        self.mouse.sensors = Sensors(self.raycast_from_edges(&self.mouse));
+
+        let mut scope = Scope::new();
+        scope.push("mouse", self.mouse.clone());
+
+        self.engine
+            .run_ast_with_scope(&mut scope, &self.ast)
+            .unwrap();
+
+        self.mouse = scope.get_value("mouse").unwrap();
 
         self.mouse.update(dt_scaled, self.maze.friction);
         self.check_collisions();
@@ -494,7 +550,7 @@ impl Simulation {
         );
 
         // Draw the rays
-        for result in mouse.sensors.iter() {
+        for result in mouse.sensors.0.iter() {
             draw_line(
                 mouse.position.x * 50.0,
                 mouse.position.y * 50.0,
@@ -507,9 +563,16 @@ impl Simulation {
     }
 }
 
+#[derive(Parser)]
+struct Args {
+    path: PathBuf,
+}
+
 #[macroquad::main("Micromouse Simulation")]
 async fn main() {
-    let mut sim = Simulation::new(10, 10); // Create a 10x10 maze
+    let args = Args::parse();
+
+    let mut sim = Simulation::new(10, 10, args.path); // Create a 10x10 maze
 
     // Set up some internal walls
     sim.maze.walls[2][2].east = true;
@@ -519,31 +582,18 @@ async fn main() {
     sim.maze.walls[5][5].west = true;
     sim.maze.walls[5][5].south = true;
 
+    let mut paused = true;
     loop {
-        let dt = get_frame_time();
+        if is_key_pressed(KeyCode::Space) {
+            paused = !paused;
+        }
 
-        // Control the mouse wheels' power (use arrow keys for this demo)
-        let left_power = if is_key_down(KeyCode::Up) {
-            1.0
-        } else if is_key_down(KeyCode::Down) {
-            -1.0
-        } else {
-            0.0
-        };
+        if !paused {
+            let dt = get_frame_time();
 
-        let right_power = if is_key_down(KeyCode::Right) {
-            1.0
-        } else if is_key_down(KeyCode::Left) {
-            -1.0
-        } else {
-            0.0
-        };
-
-        // Set power to the wheels
-        sim.mouse.set_power(left_power, right_power);
-
-        // Update the simulation
-        sim.update(dt);
+            // Update the simulation
+            sim.update(dt);
+        }
 
         // Render the simulation
         sim.render();

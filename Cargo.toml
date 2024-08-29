@@ -9,8 +9,9 @@ macroquad = "0.3.26"
 egui = "0.21.0"
 impacted = "2.0.2"
 egui-macroquad = "0.15.0"
-rhai = "1.19.0"
+rhai = { version = "1.19.0", features = ["f32_float"]}
 rsn = "0.1.0"
 serde = { version = "1.0.209", features = ["derive"] }
 serde_json = { version = "1.0.127", features = ["preserve_order"] }
 rand = { version = "0.8.5", features = ["serde"] }
+clap = { version = "4.5.16", features = ["derive"] }
