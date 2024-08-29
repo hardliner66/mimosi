@@ -15,3 +15,4 @@ serde = { version = "1.0.209", features = ["derive"] }
 serde_json = { version = "1.0.127", features = ["preserve_order"] }
 rand = { version = "0.8.5", features = ["serde"] }
 clap = { version = "4.5.16", features = ["derive"] }
+rapier3d = "0.22.0"
