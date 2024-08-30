@@ -8,6 +8,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions: write-all
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -27,6 +29,8 @@ jobs:
     needs: release
     steps:
     - uses: actions/checkout@v3
+    - name: Pre-requesites
+      run: sudo apt-get install pkg-config libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev
     - name: Run build
       run: cargo build --release && strip --strip-all ./target/release/mimosi && mv ./target/release/mimosi ./target/release/mimosi-linux
 
