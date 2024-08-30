@@ -13,9 +13,13 @@ use rhai::{
 use serde::{Deserialize, Serialize};
 
 const RIGHT: f32 = 0.0;
+const UP_RIGHT: f32 = std::f32::consts::FRAC_PI_4;
 const UP: f32 = std::f32::consts::FRAC_PI_2;
+const UP_LEFT: f32 = UP + std::f32::consts::FRAC_PI_4;
 const LEFT: f32 = std::f32::consts::PI;
+const DOWN_LEFT: f32 = LEFT + std::f32::consts::FRAC_PI_4;
 const DOWN: f32 = 3.0 * std::f32::consts::FRAC_PI_2;
+const DOWN_RIGHT: f32 = DOWN + std::f32::consts::FRAC_PI_4;
 
 pub fn build_engine() -> Engine {
     let mut engine = Engine::new();
@@ -29,6 +33,7 @@ pub fn build_engine() -> Engine {
     engine
         .build_type::<Micromouse>()
         .build_type::<Sensor>()
+        .register_iterator::<Sensors>()
         .register_indexer_get(Sensors::get_sensors);
 
     engine
@@ -110,7 +115,17 @@ struct Sensor {
 }
 
 #[derive(Clone, CustomType, Debug, Serialize, Deserialize)]
-struct Sensors(#[rhai_type(skip)] [Sensor; 8]);
+struct Sensors(#[rhai_type(skip)] Vec<Sensor>);
+
+impl IntoIterator for Sensors {
+    type Item = Sensor;
+
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
 
 impl Sensors {
     fn get_sensors(&mut self, index: i64) -> Sensor {
@@ -170,72 +185,51 @@ impl Micromouse {
             tire_friction: 0.8,
             width,
             length,
-            sensors: Sensors([
-                Sensor {
-                    position_offset: Vec2 {
-                        x: half_length,
-                        y: half_width,
+            sensors: Sensors(
+                [
+                    Sensor {
+                        position_offset: Vec2 {
+                            x: half_length,
+                            y: half_width,
+                        },
+                        angle: UP_RIGHT,
+                        ..Default::default()
                     },
-                    angle: RIGHT,
-                    ..Default::default()
-                },
-                Sensor {
-                    position_offset: Vec2 {
-                        x: half_length,
-                        y: half_width,
+                    Sensor {
+                        position_offset: Vec2 {
+                            x: half_length,
+                            y: -half_width,
+                        },
+                        angle: DOWN_RIGHT,
+                        ..Default::default()
                     },
-                    angle: DOWN,
-                    ..Default::default()
-                },
-                Sensor {
-                    position_offset: Vec2 {
-                        x: half_length,
-                        y: -half_width,
+                    Sensor {
+                        position_offset: Vec2 {
+                            x: -half_length,
+                            y: -half_width,
+                        },
+                        angle: DOWN_LEFT,
+                        ..Default::default()
                     },
-                    angle: RIGHT,
-                    ..Default::default()
-                },
-                Sensor {
-                    position_offset: Vec2 {
-                        x: half_length,
-                        y: -half_width,
+                    Sensor {
+                        position_offset: Vec2 {
+                            x: -half_length,
+                            y: half_width,
+                        },
+                        angle: UP_LEFT,
+                        ..Default::default()
                     },
-                    angle: UP,
-                    ..Default::default()
-                },
-                Sensor {
-                    position_offset: Vec2 {
-                        x: -half_length,
-                        y: -half_width,
+                    Sensor {
+                        position_offset: Vec2 {
+                            x: half_length + half_width,
+                            y: 0.0,
+                        },
+                        angle: RIGHT,
+                        ..Default::default()
                     },
-                    angle: UP,
-                    ..Default::default()
-                },
-                Sensor {
-                    position_offset: Vec2 {
-                        x: -half_length,
-                        y: -half_width,
-                    },
-                    angle: LEFT,
-                    ..Default::default()
-                },
-                Sensor {
-                    position_offset: Vec2 {
-                        x: -half_length,
-                        y: half_width,
-                    },
-                    angle: LEFT,
-                    ..Default::default()
-                },
-                Sensor {
-                    position_offset: Vec2 {
-                        x: -half_length,
-                        y: half_width,
-                    },
-                    angle: DOWN,
-                    ..Default::default()
-                },
-            ]),
+                ]
+                .to_vec(),
+            ),
         }
     }
 
