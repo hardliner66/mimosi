@@ -1,5 +1,7 @@
 use std::{
+    f32::consts::PI,
     fmt::Debug,
+    ops::Deref,
     path::{Path, PathBuf},
 };
 
@@ -9,6 +11,12 @@ use rhai::{
     packages::{CorePackage, Package},
     CustomType, Engine, Scope, TypeBuilder, AST,
 };
+use serde::{Deserialize, Serialize};
+
+const RIGHT: f32 = 0.0;
+const UP: f32 = std::f32::consts::FRAC_PI_2;
+const LEFT: f32 = std::f32::consts::PI;
+const DOWN: f32 = 3.0 * std::f32::consts::FRAC_PI_2;
 
 pub fn build_engine() -> Engine {
     let mut engine = Engine::new();
@@ -20,30 +28,101 @@ pub fn build_engine() -> Engine {
     engine.register_global_module(package.as_shared_module());
 
     engine
-        .build_type::<RaycastResult>()
-        .register_fn("to_debug", |r: RaycastResult| format!("{}", r.distance))
-        .register_fn("to_string", |r: RaycastResult| format!("{}", r.distance))
         .build_type::<Micromouse>()
-        .build_type::<Sensors>()
+        .build_type::<Sensor>()
         .register_indexer_get(Sensors::get_sensors);
 
     engine
 }
 
-#[derive(Clone, CustomType, Debug)]
-struct Sensors(#[rhai_type(skip)] [RaycastResult; 8]);
+#[derive(Debug, Clone, Copy)]
+struct Ray {
+    origin: Vec2,
+    direction: Vec2,
+}
 
-impl Sensors {
-    fn get_sensors(&mut self, index: i64) -> RaycastResult {
-        self.0[index as usize]
+impl Ray {
+    fn intersect(&self, wall: &Wall) -> Option<Vec2> {
+        let edges = [
+            (wall.p1, wall.p2),
+            (wall.p2, wall.p3),
+            (wall.p3, wall.p4),
+            (wall.p4, wall.p1),
+        ];
+
+        let mut found = None;
+
+        for (p1, p2) in edges {
+            let wall_dir = p2 - p1;
+            let perp_wall_dir = wall_dir.perp();
+
+            let ray_to_wall_start = p1 - self.origin;
+
+            let denom = self.direction.dot(perp_wall_dir);
+
+            if denom.abs() < std::f32::EPSILON {
+                continue;
+            }
+
+            let t1 = ray_to_wall_start.dot(perp_wall_dir) / denom;
+            let t2 = ray_to_wall_start.dot(self.direction.perp()) / denom;
+
+            if t1 >= 0.0 && t2 >= 0.0 && t2 <= 1.0 {
+                found = Some(Vec2 {
+                    x: self.origin.x + t1 * self.direction.x,
+                    y: self.origin.y + t1 * self.direction.y,
+                });
+            }
+        }
+        found
+    }
+    fn find_nearest_intersection(&self, walls: &[Wall]) -> Option<(Vec2, f32)> {
+        let mut nearest_intersection: Option<Vec2> = None;
+        let mut nearest_distance = f32::MAX;
+
+        for wall in walls {
+            if let Some(intersection) = self.intersect(wall) {
+                let distance = (intersection.x - self.origin.x).powi(2)
+                    + (intersection.y - self.origin.y).powi(2);
+
+                if distance < nearest_distance {
+                    nearest_distance = distance;
+                    nearest_intersection = Some(intersection);
+                }
+            }
+        }
+
+        nearest_intersection.map(|i| (i, nearest_distance))
     }
 }
 
-#[derive(Clone, CustomType, Debug)]
-struct Micromouse {
+#[derive(Clone, CustomType, Debug, Default, Serialize, Deserialize)]
+struct Sensor {
     #[rhai_type(readonly)]
-    sensors: Sensors,
+    #[serde(with = "Vec2Def")]
+    position_offset: Vec2, // Offset relative to the center of the rectangle
+    #[rhai_type(readonly)]
+    angle: f32, // Angle in radians
+    #[rhai_type(readonly)]
+    value: f32,
     #[rhai_type(skip)]
+    #[serde(skip)]
+    closest_point: Vec2,
+}
+
+#[derive(Clone, CustomType, Debug, Serialize, Deserialize)]
+struct Sensors(#[rhai_type(skip)] [Sensor; 8]);
+
+impl Sensors {
+    fn get_sensors(&mut self, index: i64) -> Sensor {
+        self.0[index as usize].clone()
+    }
+}
+
+#[derive(Clone, CustomType, Debug, Serialize, Deserialize)]
+struct Micromouse {
+    #[rhai_type(skip)]
+    #[serde(with = "Vec2Def")]
     position: Vec2,
     #[rhai_type(skip)]
     direction: f32, // Current direction in radians
@@ -67,24 +146,97 @@ struct Micromouse {
     width: f32, // Width of the mouse
     #[rhai_type(readonly)]
     length: f32, // Length of the mouse (not including the triangle)
+    #[rhai_type(readonly)]
+    sensors: Sensors,
 }
 
 impl Micromouse {
-    fn new() -> Self {
+    fn new(position: Vec2, direction: f32) -> Self {
+        let width = 15.0;
+        let length = 25.0;
+
+        let half_width = width / 2.0;
+        let half_length = length / 2.0;
+
         Self {
-            sensors: Sensors([Default::default(); 8]),
-            position: vec2(1.5, 1.5),
-            direction: 0.0,
+            position: position,
+            direction,
             left_power: 0.0,
             right_power: 0.0,
             left_velocity: 0.0,
             right_velocity: 0.0,
-            max_speed: 5.0,     // Example max speed
-            mass: 1.0,          // Example mass
-            wheel_base: 0.5,    // Distance between wheels
-            tire_friction: 0.8, // Example tire friction coefficient
-            width: 0.3,         // Example width of the mouse
-            length: 0.5,        // Example length of the mouse (rectangle part)
+            max_speed: 250.0,
+            mass: 1.0,
+            wheel_base: 0.5,
+            tire_friction: 0.8,
+            width,
+            length,
+            sensors: Sensors([
+                Sensor {
+                    position_offset: Vec2 {
+                        x: half_length,
+                        y: half_width,
+                    },
+                    angle: RIGHT,
+                    ..Default::default()
+                },
+                Sensor {
+                    position_offset: Vec2 {
+                        x: half_length,
+                        y: half_width,
+                    },
+                    angle: DOWN,
+                    ..Default::default()
+                },
+                Sensor {
+                    position_offset: Vec2 {
+                        x: half_length,
+                        y: -half_width,
+                    },
+                    angle: RIGHT,
+                    ..Default::default()
+                },
+                Sensor {
+                    position_offset: Vec2 {
+                        x: half_length,
+                        y: -half_width,
+                    },
+                    angle: UP,
+                    ..Default::default()
+                },
+                Sensor {
+                    position_offset: Vec2 {
+                        x: -half_length,
+                        y: -half_width,
+                    },
+                    angle: UP,
+                    ..Default::default()
+                },
+                Sensor {
+                    position_offset: Vec2 {
+                        x: -half_length,
+                        y: -half_width,
+                    },
+                    angle: LEFT,
+                    ..Default::default()
+                },
+                Sensor {
+                    position_offset: Vec2 {
+                        x: -half_length,
+                        y: half_width,
+                    },
+                    angle: LEFT,
+                    ..Default::default()
+                },
+                Sensor {
+                    position_offset: Vec2 {
+                        x: -half_length,
+                        y: half_width,
+                    },
+                    angle: DOWN,
+                    ..Default::default()
+                },
+            ]),
         }
     }
 
@@ -116,7 +268,7 @@ impl Micromouse {
         let turning_rate = (self.right_velocity - self.left_velocity) / self.wheel_base;
 
         // Update direction and position
-        self.direction += turning_rate * dt;
+        self.direction += (turning_rate * dt).div_euclid(2.0 * PI);
         self.position.x += average_velocity * self.direction.cos() * dt;
         self.position.y += average_velocity * self.direction.sin() * dt;
 
@@ -155,10 +307,11 @@ impl Micromouse {
     }
 }
 
-struct Maze {
+struct MazeGenerator {
     width: usize,
     height: usize,
-    walls: Vec<Vec<CellWalls>>, // 2D grid representing walls in each cell
+    cell_size: f32,
+    cells: Vec<Vec<CellWalls>>, // 2D grid representing walls in each cell
     friction: f32,              // Friction coefficient of the maze surface
 }
 
@@ -170,33 +323,323 @@ struct CellWalls {
     west: bool,
 }
 
-#[derive(Debug, Clone, Copy, Default, CustomType)]
-struct RaycastResult {
-    #[rhai_type(readonly)]
-    distance: f32,
-    hit_point: Vec2,
+#[derive(Serialize, Deserialize)]
+enum StartDirection {
+    Up,
+    Right,
+    Down,
+    Left,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Wall(Rectangle);
+
+impl Deref for Wall {
+    type Target = Rectangle;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "Vec2")]
+struct Vec2Def {
+    x: f32,
+    y: f32,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct Rectangle {
+    #[serde(with = "Vec2Def")]
+    p1: Vec2,
+    #[serde(with = "Vec2Def")]
+    p2: Vec2,
+    #[serde(with = "Vec2Def")]
+    p3: Vec2,
+    #[serde(with = "Vec2Def")]
+    p4: Vec2,
+}
+
+impl From<Rectangle> for Wall {
+    fn from(value: Rectangle) -> Self {
+        Wall(value)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct Maze {
+    walls: Vec<Wall>, // 2D grid representing walls in each cell
+    friction: f32,    // Friction coefficient of the maze surface
+    #[serde(with = "Vec2Def")]
+    start: Vec2,
+    start_direction: StartDirection,
+    finish: Rectangle,
+}
+
+fn cell_walls_to_walls(cell_position: Vec2, cell_walls: CellWalls, cell_size: f32) -> Vec<Wall> {
+    let mut walls = Vec::new();
+
+    if cell_walls.north {
+        walls.push(
+            Rectangle {
+                p1: Vec2 {
+                    x: cell_position.x,
+                    y: cell_position.y + cell_size,
+                },
+                p2: Vec2 {
+                    x: cell_position.x + cell_size,
+                    y: cell_position.y + cell_size,
+                },
+                p3: Vec2 {
+                    x: cell_position.x + cell_size,
+                    y: cell_position.y + cell_size + 2.0,
+                },
+                p4: Vec2 {
+                    x: cell_position.x,
+                    y: cell_position.y + cell_size + 2.0,
+                },
+            }
+            .into(),
+        );
+    }
+
+    if cell_walls.south {
+        walls.push(
+            Rectangle {
+                p1: Vec2 {
+                    x: cell_position.x,
+                    y: cell_position.y,
+                },
+                p2: Vec2 {
+                    x: cell_position.x + cell_size,
+                    y: cell_position.y,
+                },
+                p3: Vec2 {
+                    x: cell_position.x + cell_size,
+                    y: cell_position.y + 2.0,
+                },
+                p4: Vec2 {
+                    x: cell_position.x,
+                    y: cell_position.y + 2.0,
+                },
+            }
+            .into(),
+        );
+    }
+
+    if cell_walls.east {
+        walls.push(
+            Rectangle {
+                p1: Vec2 {
+                    x: cell_position.x + cell_size,
+                    y: cell_position.y,
+                },
+                p2: Vec2 {
+                    x: cell_position.x + cell_size,
+                    y: cell_position.y + cell_size,
+                },
+                p3: Vec2 {
+                    x: cell_position.x + cell_size + 2.0,
+                    y: cell_position.y + cell_size,
+                },
+                p4: Vec2 {
+                    x: cell_position.x + cell_size + 2.0,
+                    y: cell_position.y,
+                },
+            }
+            .into(),
+        );
+    }
+
+    if cell_walls.west {
+        walls.push(
+            Rectangle {
+                p1: Vec2 {
+                    x: cell_position.x,
+                    y: cell_position.y,
+                },
+                p2: Vec2 {
+                    x: cell_position.x,
+                    y: cell_position.y + cell_size,
+                },
+                p3: Vec2 {
+                    x: cell_position.x + 2.0,
+                    y: cell_position.y + cell_size,
+                },
+                p4: Vec2 {
+                    x: cell_position.x + 2.0,
+                    y: cell_position.y,
+                },
+            }
+            .into(),
+        );
+    }
+
+    walls
+}
+
+impl From<MazeGenerator> for Maze {
+    fn from(
+        MazeGenerator {
+            width,
+            height,
+            cell_size,
+            cells,
+            friction,
+        }: MazeGenerator,
+    ) -> Self {
+        let mut walls = Vec::new();
+        walls.push(
+            Rectangle {
+                p1: vec2(0.0, 0.0),
+                p2: vec2(width as f32 * cell_size, 0.0),
+                p3: vec2(width as f32 * cell_size, 0.0),
+                p4: vec2(0.0, 0.0),
+            }
+            .into(),
+        );
+
+        walls.push(
+            Rectangle {
+                p1: vec2(0.0, 0.0),
+                p2: vec2(0.0, height as f32 * cell_size),
+                p3: vec2(0.0, height as f32 * cell_size),
+                p4: vec2(0.0, 0.0),
+            }
+            .into(),
+        );
+
+        walls.push(
+            Rectangle {
+                p1: vec2(width as f32 * cell_size, height as f32 * cell_size),
+                p2: vec2(width as f32 * cell_size, 0.0),
+                p3: vec2(width as f32 * cell_size, 0.0),
+                p4: vec2(width as f32 * cell_size, height as f32 * cell_size),
+            }
+            .into(),
+        );
+
+        walls.push(
+            Rectangle {
+                p1: vec2(width as f32 * cell_size, height as f32 * cell_size),
+                p2: vec2(0.0, height as f32 * cell_size),
+                p3: vec2(0.0, height as f32 * cell_size),
+                p4: vec2(width as f32 * cell_size, height as f32 * cell_size),
+            }
+            .into(),
+        );
+
+        for (i, row) in cells.iter().enumerate() {
+            for (j, cell) in row.iter().enumerate() {
+                walls.append(&mut cell_walls_to_walls(
+                    vec2(i as f32 * 50.0, j as f32 * 50.0),
+                    *cell,
+                    50.0,
+                ));
+            }
+        }
+
+        Self {
+            walls,
+            friction,
+            finish: Rectangle::default(),
+            start: Vec2::default(),
+            start_direction: StartDirection::Right,
+        }
+    }
+}
+
+// Function to check if two line segments intersect
+fn lines_intersect(p1: Vec2, p2: Vec2, q1: Vec2, q2: Vec2) -> bool {
+    fn orientation(a: Vec2, b: Vec2, c: Vec2) -> i32 {
+        let val = (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
+        if val == 0.0 {
+            return 0;
+        }
+        if val > 0.0 {
+            1
+        } else {
+            -1
+        }
+    }
+
+    let o1 = orientation(p1, p2, q1);
+    let o2 = orientation(p1, p2, q2);
+    let o3 = orientation(q1, q2, p1);
+    let o4 = orientation(q1, q2, p2);
+
+    if o1 != o2 && o3 != o4 {
+        return true;
+    }
+
+    false
+}
+
+fn rectangle_wall_collision(p1: Vec2, p2: Vec2, p3: Vec2, p4: Vec2, wall: &Wall) -> bool {
+    let rect_edges = [
+        (p1, p2), // Top edge
+        (p2, p3), // Right edge
+        (p3, p4), // Bottom edge
+        (p4, p1), // Left edge
+    ];
+
+    // Check each edge of the rectangle against the wall
+    for &(p1, p2) in &rect_edges {
+        if lines_intersect(p1, p2, wall.p1, wall.p2)
+            || lines_intersect(p1, p2, wall.p2, wall.p3)
+            || lines_intersect(p1, p2, wall.p3, wall.p4)
+            || lines_intersect(p1, p2, wall.p4, wall.p1)
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn triangle_wall_collision(a: Vec2, b: Vec2, c: Vec2, wall: &Wall) -> bool {
+    let triangle_edges = [(a, b), (b, c), (c, a)];
+
+    // Check each edge of the triangle against the wall
+    for &(p1, p2) in &triangle_edges {
+        if lines_intersect(p1, p2, wall.p1, wall.p2)
+            || lines_intersect(p1, p2, wall.p2, wall.p3)
+            || lines_intersect(p1, p2, wall.p3, wall.p4)
+            || lines_intersect(p1, p2, wall.p4, wall.p1)
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 struct Simulation {
     engine: Engine,
     mouse: Micromouse,
+    collided: bool,
     maze: Maze,
     time_scale: f32, // Speed factor for the simulation and replay
     ast: AST,
 }
 
 impl Simulation {
-    fn new<P: AsRef<Path>>(maze_width: usize, maze_height: usize, script: P) -> Self {
+    fn new<P: AsRef<Path>>(script: P, maze: Maze) -> Self {
         let engine = build_engine();
         let ast = engine.compile_file(script.as_ref().to_path_buf()).unwrap();
         Self {
-            mouse: Micromouse::new(),
-            maze: Maze {
-                friction: 0.2, // Example maze friction coefficient
-                width: maze_width,
-                height: maze_height,
-                walls: vec![vec![CellWalls::default(); maze_height]; maze_width],
-            },
+            mouse: Micromouse::new(
+                maze.start,
+                match maze.start_direction {
+                    StartDirection::Up => UP,
+                    StartDirection::Right => RIGHT,
+                    StartDirection::Down => DOWN,
+                    StartDirection::Left => LEFT,
+                },
+            ),
+            collided: false,
+            maze,
             time_scale: 1.0,
             engine,
             ast,
@@ -206,23 +649,29 @@ impl Simulation {
     fn update(&mut self, dt: f32) {
         let dt_scaled = dt * self.time_scale;
 
-        self.mouse.sensors = Sensors(self.raycast_from_edges(&self.mouse));
-
-        let mut scope = Scope::new();
-        scope.push("mouse", self.mouse.clone());
-
-        self.engine
-            .run_ast_with_scope(&mut scope, &self.ast)
-            .unwrap();
-
-        self.mouse = scope.get_value("mouse").unwrap();
-
         self.mouse.update(dt_scaled, self.maze.friction);
-        self.check_collisions();
+
+        for sensor in &mut self.mouse.sensors.0 {
+            let p = self.mouse.position + sensor.position_offset;
+            let angle = self.mouse.direction + sensor.angle;
+            let r = Ray {
+                origin: p,
+                direction: Vec2::from_angle(angle),
+            };
+            if let Some((p, v)) = r.find_nearest_intersection(&self.maze.walls) {
+                sensor.value = v;
+                sensor.closest_point = p;
+            }
+        }
+
+        if self.check_collisions() {
+            self.collided = true;
+        }
     }
 
-    fn check_collisions(&mut self) {
+    fn check_collisions(&self) -> bool {
         let mouse = &self.mouse;
+
         let half_width = mouse.width / 2.0;
         let half_length = mouse.length / 2.0;
 
@@ -235,227 +684,27 @@ impl Simulation {
             + vec2(half_length, -half_width).rotate(Vec2::from_angle(mouse.direction));
         let front_right = mouse.position
             + vec2(half_length, half_width).rotate(Vec2::from_angle(mouse.direction));
+        let front_center = mouse.position
+            + vec2(half_length + half_width, 0.0).rotate(Vec2::from_angle(mouse.direction));
 
-        // Check each corner for collision with the maze boundaries
-        let corners = [rear_left, rear_right, front_left, front_right];
-        for &corner in &corners {
-            if corner.x < 0.0 {
-                self.handle_wall_collision(corner, Vec2::new(-1.0, 0.0));
-            } else if corner.x > (self.maze.width as f32) {
-                self.handle_wall_collision(corner, Vec2::new(1.0, 0.0));
-            }
+        let r1 = rear_left;
+        let r2 = front_left;
+        let r3 = front_right;
+        let r4 = rear_right;
 
-            if corner.y < 0.0 {
-                self.handle_wall_collision(corner, Vec2::new(0.0, -1.0));
-            } else if corner.y > (self.maze.height as f32) {
-                self.handle_wall_collision(corner, Vec2::new(0.0, 1.0));
-            }
-        }
+        // Draw the triangular front
+        let t1 = front_left;
+        let t2 = front_right;
+        let t3 = front_center;
 
-        // Check internal walls
-        for &corner in &corners {
-            let cell_x = corner.x.floor() as usize;
-            let cell_y = corner.y.floor() as usize;
-
-            if cell_x < self.maze.width && cell_y < self.maze.height {
-                let walls = self.maze.walls[cell_x][cell_y];
-
-                if walls.north && corner.y.fract() < 0.1 {
-                    self.handle_wall_collision(corner, Vec2::new(0.0, -1.0));
-                    return;
-                }
-                if walls.south && corner.y.fract() > 0.9 {
-                    self.handle_wall_collision(corner, Vec2::new(0.0, 1.0));
-                    return;
-                }
-                if walls.west && corner.x.fract() < 0.1 {
-                    self.handle_wall_collision(corner, Vec2::new(-1.0, 0.0));
-                    return;
-                }
-                if walls.east && corner.x.fract() > 0.9 {
-                    self.handle_wall_collision(corner, Vec2::new(1.0, 0.0));
-                    return;
-                }
+        for wall in &self.maze.walls {
+            if rectangle_wall_collision(r1, r2, r3, r4, wall)
+                || triangle_wall_collision(t1, t2, t3, wall)
+            {
+                return true;
             }
         }
-    }
-
-    fn handle_wall_collision(&mut self, corner: Vec2, normal: Vec2) {
-        let mouse = &mut self.mouse;
-        let restitution = 0.3; // Coefficient of restitution (bounciness)
-
-        // Calculate the penetration depth
-        let penetration_depth = (corner - mouse.position).dot(normal);
-
-        // Adjust the mouse position based on the penetration depth
-        mouse.position -= normal * penetration_depth;
-
-        // Reflect the velocity component normal to the wall
-        let velocity_normal = (mouse.left_velocity * mouse.direction.cos()
-            + mouse.right_velocity * mouse.direction.sin())
-            * normal;
-        mouse.left_velocity -= 2.0 * velocity_normal.x * normal.x * restitution;
-        mouse.right_velocity -= 2.0 * velocity_normal.y * normal.y * restitution;
-    }
-
-    fn perform_raycast(&self, origin: Vec2, direction: Vec2) -> RaycastResult {
-        let mut closest_distance = f32::MAX;
-        let mut closest_point = origin + direction * closest_distance;
-
-        // Check for intersection with the maze boundaries
-        let maze_width = self.maze.width as f32;
-        let maze_height = self.maze.height as f32;
-
-        // Check intersections with the maze boundaries
-        if direction.x != 0.0 {
-            if direction.x > 0.0 {
-                let t = (maze_width - origin.x) / direction.x;
-                if t >= 0.0 {
-                    let y_intersection = origin.y + t * direction.y;
-                    if y_intersection >= 0.0 && y_intersection <= maze_height {
-                        closest_distance = t;
-                        closest_point = origin + direction * t;
-                    }
-                }
-            } else {
-                let t = (0.0 - origin.x) / direction.x;
-                if t >= 0.0 {
-                    let y_intersection = origin.y + t * direction.y;
-                    if y_intersection >= 0.0 && y_intersection <= maze_height {
-                        closest_distance = t;
-                        closest_point = origin + direction * t;
-                    }
-                }
-            }
-        }
-
-        if direction.y != 0.0 {
-            if direction.y > 0.0 {
-                let t = (maze_height - origin.y) / direction.y;
-                if t >= 0.0 {
-                    let x_intersection = origin.x + t * direction.x;
-                    if x_intersection >= 0.0 && x_intersection <= maze_width {
-                        if t < closest_distance {
-                            closest_distance = t;
-                            closest_point = origin + direction * t;
-                        }
-                    }
-                }
-            } else {
-                let t = (0.0 - origin.y) / direction.y;
-                if t >= 0.0 {
-                    let x_intersection = origin.x + t * direction.x;
-                    if x_intersection >= 0.0 && x_intersection <= maze_width {
-                        if t < closest_distance {
-                            closest_distance = t;
-                            closest_point = origin + direction * t;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Check intersections with internal walls
-        for x in 0..self.maze.width {
-            for y in 0..self.maze.height {
-                let walls = self.maze.walls[x][y];
-                let cell_x = x as f32;
-                let cell_y = y as f32;
-
-                // Check north wall
-                if walls.north {
-                    let t = (cell_y - origin.y) / direction.y;
-                    if t >= 0.0 {
-                        let x_intersection = origin.x + t * direction.x;
-                        if x_intersection >= cell_x && x_intersection <= cell_x + 1.0 {
-                            if t < closest_distance {
-                                closest_distance = t;
-                                closest_point = origin + direction * t;
-                            }
-                        }
-                    }
-                }
-                // Check south wall
-                if walls.south {
-                    let t = (cell_y + 1.0 - origin.y) / direction.y;
-                    if t >= 0.0 {
-                        let x_intersection = origin.x + t * direction.x;
-                        if x_intersection >= cell_x && x_intersection <= cell_x + 1.0 {
-                            if t < closest_distance {
-                                closest_distance = t;
-                                closest_point = origin + direction * t;
-                            }
-                        }
-                    }
-                }
-                // Check west wall
-                if walls.west {
-                    let t = (cell_x - origin.x) / direction.x;
-                    if t >= 0.0 {
-                        let y_intersection = origin.y + t * direction.y;
-                        if y_intersection >= cell_y && y_intersection <= cell_y + 1.0 {
-                            if t < closest_distance {
-                                closest_distance = t;
-                                closest_point = origin + direction * t;
-                            }
-                        }
-                    }
-                }
-                // Check east wall
-                if walls.east {
-                    let t = (cell_x + 1.0 - origin.x) / direction.x;
-                    if t >= 0.0 {
-                        let y_intersection = origin.y + t * direction.y;
-                        if y_intersection >= cell_y && y_intersection <= cell_y + 1.0 {
-                            if t < closest_distance {
-                                closest_distance = t;
-                                closest_point = origin + direction * t;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        RaycastResult {
-            distance: closest_distance,
-            hit_point: closest_point,
-        }
-    }
-
-    fn raycast_from_edges(&self, mouse: &Micromouse) -> [RaycastResult; 8] {
-        let half_width = mouse.width / 2.0;
-        let half_length = mouse.length / 2.0;
-
-        // Calculate the corners of the rectangle
-        let rear_left = mouse.position
-            + vec2(-half_length, -half_width).rotate(Vec2::from_angle(mouse.direction));
-        let rear_right = mouse.position
-            + vec2(-half_length, half_width).rotate(Vec2::from_angle(mouse.direction));
-        let front_left = mouse.position
-            + vec2(half_length, -half_width).rotate(Vec2::from_angle(mouse.direction));
-        let front_right = mouse.position
-            + vec2(half_length, half_width).rotate(Vec2::from_angle(mouse.direction));
-
-        // Directions to cast rays
-        let directions = [
-            vec2(1.0, 0.0).rotate(Vec2::from_angle(mouse.direction)), // Front
-            vec2(-1.0, 0.0).rotate(Vec2::from_angle(mouse.direction)), // Back
-            vec2(0.0, 1.0).rotate(Vec2::from_angle(mouse.direction)), // Right
-            vec2(0.0, -1.0).rotate(Vec2::from_angle(mouse.direction)), // Left
-        ];
-
-        // Perform raycasts from each corner in the specified directions
-        [
-            self.perform_raycast(front_left, directions[0]),
-            self.perform_raycast(front_right, directions[0]),
-            self.perform_raycast(rear_left, directions[1]),
-            self.perform_raycast(rear_right, directions[1]),
-            self.perform_raycast(front_left, directions[3]),
-            self.perform_raycast(rear_left, directions[3]),
-            self.perform_raycast(front_right, directions[2]),
-            self.perform_raycast(rear_right, directions[2]),
-        ]
+        return false;
     }
 
     fn render(&self) {
@@ -469,55 +718,12 @@ impl Simulation {
     }
 
     fn render_maze(&self) {
-        for x in 0..self.maze.width {
-            for y in 0..self.maze.height {
-                let walls = self.maze.walls[x][y];
-
-                let cell_x = x as f32 * 50.0;
-                let cell_y = y as f32 * 50.0;
-
-                // Draw the cell boundaries (internal walls)
-                if walls.north {
-                    draw_line(cell_x, cell_y, cell_x + 50.0, cell_y, 2.0, BLACK);
-                }
-                if walls.south {
-                    draw_line(
-                        cell_x,
-                        cell_y + 50.0,
-                        cell_x + 50.0,
-                        cell_y + 50.0,
-                        2.0,
-                        BLACK,
-                    );
-                }
-                if walls.west {
-                    draw_line(cell_x, cell_y, cell_x, cell_y + 50.0, 2.0, BLACK);
-                }
-                if walls.east {
-                    draw_line(
-                        cell_x + 50.0,
-                        cell_y,
-                        cell_x + 50.0,
-                        cell_y + 50.0,
-                        2.0,
-                        BLACK,
-                    );
-                }
-            }
+        for wall in &self.maze.walls {
+            draw_line(wall.p1.x, wall.p1.y, wall.p2.x, wall.p2.y, 1.0, BLACK);
+            draw_line(wall.p2.x, wall.p2.y, wall.p3.x, wall.p3.y, 1.0, BLACK);
+            draw_line(wall.p3.x, wall.p3.y, wall.p4.x, wall.p4.y, 1.0, BLACK);
+            draw_line(wall.p4.x, wall.p4.y, wall.p1.x, wall.p1.y, 1.0, BLACK);
         }
-
-        // Draw the outside walls of the maze
-        let width = self.maze.width as f32 * 50.0;
-        let height = self.maze.height as f32 * 50.0;
-
-        // Top wall
-        draw_line(0.0, 0.0, width, 0.0, 2.0, BLACK);
-        // Bottom wall
-        draw_line(0.0, height, width, height, 2.0, BLACK);
-        // Left wall
-        draw_line(0.0, 0.0, 0.0, height, 2.0, BLACK);
-        // Right wall
-        draw_line(width, 0.0, width, height, 2.0, BLACK);
     }
 
     fn render_mouse(&self) {
@@ -538,26 +744,34 @@ impl Simulation {
             + vec2(half_length + half_width, 0.0).rotate(Vec2::from_angle(mouse.direction));
 
         // Draw the rectangle part of the mouse
-        draw_triangle(rear_left * 50.0, rear_right * 50.0, front_right * 50.0, RED);
-        draw_triangle(rear_left * 50.0, front_left * 50.0, front_right * 50.0, RED);
+        draw_triangle(rear_left, rear_right, front_right, RED);
+        draw_triangle(rear_left, front_left, front_right, RED);
 
         // Draw the triangular front
-        draw_triangle(
-            front_left * 50.0,
-            front_right * 50.0,
-            front_center * 50.0,
-            BLUE,
-        );
+        draw_triangle(front_left, front_right, front_center, BLUE);
 
-        // Draw the rays
-        for result in mouse.sensors.0.iter() {
+        for sensor in &self.mouse.sensors.0 {
+            let p1 = self.mouse.position + sensor.position_offset;
+            let p2 = sensor.closest_point;
+            draw_line(p1.x, p1.y, p2.x, p2.y, 2.0, DARKPURPLE);
+        }
+
+        if self.collided {
             draw_line(
-                mouse.position.x * 50.0,
-                mouse.position.y * 50.0,
-                result.hit_point.x * 50.0,
-                result.hit_point.y * 50.0,
-                1.0,
-                DARKPURPLE,
+                rear_left.x,
+                rear_left.y,
+                front_right.x,
+                front_right.y,
+                2.0,
+                BLACK,
+            );
+            draw_line(
+                rear_right.x,
+                rear_right.y,
+                front_left.x,
+                front_left.y,
+                2.0,
+                BLACK,
             );
         }
     }
@@ -572,26 +786,46 @@ struct Args {
 async fn main() {
     let args = Args::parse();
 
-    let mut sim = Simulation::new(10, 10, args.path); // Create a 10x10 maze
-
     // Set up some internal walls
-    sim.maze.walls[2][2].east = true;
-    sim.maze.walls[3][2].west = true;
-    sim.maze.walls[4][4].north = true;
-    sim.maze.walls[4][3].south = true;
-    sim.maze.walls[5][5].west = true;
-    sim.maze.walls[5][5].south = true;
+    let mut mg = MazeGenerator {
+        height: 10,
+        width: 10,
+        cell_size: 50.0,
+        friction: 0.8,
+        cells: vec![vec![CellWalls::default(); 10]; 10],
+    };
+    mg.cells[2][2].east = true;
+    mg.cells[3][2].west = true;
+    mg.cells[4][4].north = true;
+    mg.cells[4][3].south = true;
+    mg.cells[5][5].west = true;
+    mg.cells[5][5].south = true;
+
+    let mut maze: Maze = mg.into();
+    maze.start = vec2(75.0, 75.0);
+    maze.start_direction = StartDirection::Right;
+
+    let mut sim = Simulation::new(args.path, maze); // Create a 10x10 maze
 
     let mut paused = true;
+
+    // Update the simulation
+    sim.update(0.0);
+
     loop {
         if is_key_pressed(KeyCode::Space) {
             paused = !paused;
         }
 
-        if !paused {
-            let dt = get_frame_time();
+        let dt = get_frame_time();
+        if !paused && !sim.collided {
+            let mut scope = Scope::new();
+            scope.push("mouse", sim.mouse.clone());
 
-            // Update the simulation
+            sim.engine.run_ast_with_scope(&mut scope, &sim.ast).unwrap();
+
+            sim.mouse = scope.get_value("mouse").unwrap();
+
             sim.update(dt);
         }
 
