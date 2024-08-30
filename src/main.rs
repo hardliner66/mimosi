@@ -1,5 +1,4 @@
 use std::{
-    f32::consts::PI,
     fmt::Debug,
     ops::Deref,
     path::{Path, PathBuf},
@@ -159,15 +158,15 @@ impl Micromouse {
         let half_length = length / 2.0;
 
         Self {
-            position: position,
+            position,
             direction,
             left_power: 0.0,
             right_power: 0.0,
             left_velocity: 0.0,
             right_velocity: 0.0,
-            max_speed: 250.0,
+            max_speed: 2000.0,
             mass: 1.0,
-            wheel_base: 0.5,
+            wheel_base: 25.0,
             tire_friction: 0.8,
             width,
             length,
@@ -268,7 +267,7 @@ impl Micromouse {
         let turning_rate = (self.right_velocity - self.left_velocity) / self.wheel_base;
 
         // Update direction and position
-        self.direction += (turning_rate * dt).div_euclid(2.0 * PI);
+        self.direction += turning_rate * dt;
         self.position.x += average_velocity * self.direction.cos() * dt;
         self.position.y += average_velocity * self.direction.sin() * dt;
 
@@ -652,7 +651,10 @@ impl Simulation {
         self.mouse.update(dt_scaled, self.maze.friction);
 
         for sensor in &mut self.mouse.sensors.0 {
-            let p = self.mouse.position + sensor.position_offset;
+            let p = self.mouse.position
+                + sensor
+                    .position_offset
+                    .rotate(Vec2::from_angle(self.mouse.direction));
             let angle = self.mouse.direction + sensor.angle;
             let r = Ray {
                 origin: p,
@@ -751,7 +753,10 @@ impl Simulation {
         draw_triangle(front_left, front_right, front_center, BLUE);
 
         for sensor in &self.mouse.sensors.0 {
-            let p1 = self.mouse.position + sensor.position_offset;
+            let p1 = self.mouse.position
+                + sensor
+                    .position_offset
+                    .rotate(Vec2::from_angle(mouse.direction));
             let p2 = sensor.closest_point;
             draw_line(p1.x, p1.y, p2.x, p2.y, 2.0, DARKPURPLE);
         }

@@ -7,5 +7,12 @@
 // print("Sensor 7: " + mouse.sensors[6].value);
 // print("Sensor 8: " + mouse.sensors[7].value);
 
-mouse.right_power = 1.0;
-mouse.left_power = 1.0;
+let straight = false;
+
+if straight {
+  mouse.right_power = 1.0;
+  mouse.left_power = 1.0;
+} else {
+  mouse.right_power = 0.2;
+  mouse.left_power = 0.1;
+}
