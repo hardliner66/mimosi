@@ -12,13 +12,13 @@ use rhai::{
 };
 use serde::{Deserialize, Serialize};
 
-// const RIGHT: f32 = 0.0;
+const RIGHT: f32 = 0.0;
 // const UP_RIGHT: f32 = std::f32::consts::FRAC_PI_4;
-// const UP: f32 = std::f32::consts::FRAC_PI_2;
+const UP: f32 = std::f32::consts::FRAC_PI_2;
 // const UP_LEFT: f32 = UP + std::f32::consts::FRAC_PI_4;
-// const LEFT: f32 = std::f32::consts::PI;
+const LEFT: f32 = std::f32::consts::PI;
 // const DOWN_LEFT: f32 = LEFT + std::f32::consts::FRAC_PI_4;
-// const DOWN: f32 = 3.0 * std::f32::consts::FRAC_PI_2;
+const DOWN: f32 = 3.0 * std::f32::consts::FRAC_PI_2;
 // const DOWN_RIGHT: f32 = DOWN + std::f32::consts::FRAC_PI_4;
 
 pub fn build_engine() -> Engine {
@@ -774,7 +774,9 @@ async fn main() {
     let maze = parse_maze(&maze);
 
     let mouse_config: MouseConfig =
-        rsn::from_str(&std::fs::read_to_string(args.mouse).unwrap()).unwrap();
+        toml::from_str(&std::fs::read_to_string(args.mouse).unwrap()).unwrap();
+
+    std::fs::write("mouse.toml", toml::to_string_pretty(&mouse_config).unwrap()).unwrap();
 
     let mut sim = Simulation::new(args.script, maze, mouse_config); // Create a 10x10 maze
 

@@ -7,7 +7,6 @@ edition = "2021"
 opt-level = 2
 
 [dependencies]
-indexmap = { version = "2.4.0", features = ["serde"] }
 macroquad = "0.3.26"
 egui = "0.21.0"
 impacted = "2.0.2"
@@ -18,3 +17,4 @@ serde = { version = "1.0.209", features = ["derive"] }
 serde_json = { version = "1.0.127", features = ["preserve_order"] }
 rand = { version = "0.8.5", features = ["serde"] }
 clap = { version = "4.5.16", features = ["derive"] }
+toml = { version = "0.8.19", features = ["preserve_order"] }

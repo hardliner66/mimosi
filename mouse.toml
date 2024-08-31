@@ -1,0 +1,41 @@
+max_speed = 2000.0
+mass = 1.0
+wheel_base = 25.0
+tire_friction = 0.800000011920929
+width = 15.0
+length = 25.0
+
+[[sensors]]
+angle = 0.7853981852531433
+
+[sensors.position_offset]
+x = 12.5
+y = 7.5
+
+[[sensors]]
+angle = 5.497786998748779
+
+[sensors.position_offset]
+x = 12.5
+y = -7.5
+
+[[sensors]]
+angle = 3.9269909858703613
+
+[sensors.position_offset]
+x = -12.5
+y = -7.5
+
+[[sensors]]
+angle = 2.356194496154785
+
+[sensors.position_offset]
+x = -12.5
+y = 7.5
+
+[[sensors]]
+angle = 0.0
+
+[sensors.position_offset]
+x = 20.0
+y = 0.0
