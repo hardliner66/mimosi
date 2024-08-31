@@ -1,8 +1,6 @@
-for (sensor, i) in mouse.sensors {
-  print("Sensor " + i + ": " + sensor.value);
-}
+debug(mouse);
 
-let straight = false;
+let straight = true;
 
 if straight {
   mouse.right_power = 1.0;

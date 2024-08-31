@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use macroquad::prelude::*;
 use rhai::{
     packages::{CorePackage, Package},
@@ -31,8 +31,10 @@ pub fn build_engine() -> Engine {
     engine.register_global_module(package.as_shared_module());
 
     engine
-        .build_type::<Micromouse>()
-        .build_type::<Sensor>()
+        .build_type::<MouseData>()
+        .register_fn("to_debug", |d: MouseData| format!("{d:#?}"))
+        .build_type::<SensorInfo>()
+        .build_type::<Sensors>()
         .register_iterator::<Sensors>()
         .register_indexer_get(Sensors::get_sensors);
 
@@ -100,26 +102,55 @@ impl Ray {
     }
 }
 
-#[derive(Clone, CustomType, Debug, Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct Sensor {
-    #[rhai_type(readonly)]
     #[serde(with = "Vec2Def")]
     position_offset: Vec2, // Offset relative to the center of the rectangle
-    #[rhai_type(readonly)]
     angle: f32, // Angle in radians
-    #[rhai_type(readonly)]
     #[serde(skip)]
     value: f32,
-    #[rhai_type(skip)]
     #[serde(skip)]
     closest_point: Vec2,
 }
 
-#[derive(Clone, CustomType, Debug, Serialize, Deserialize)]
-struct Sensors(#[rhai_type(skip)] Vec<Sensor>);
+#[derive(Clone, CustomType, Debug, Default)]
+struct SensorInfo {
+    #[rhai_type(readonly)]
+    position_offset: Vec2, // Offset relative to the center of the rectangle
+    #[rhai_type(readonly)]
+    angle: f32, // Angle in radians
+    #[rhai_type(readonly)]
+    value: f32,
+}
+
+impl From<&Sensor> for SensorInfo {
+    fn from(
+        &Sensor {
+            position_offset,
+            angle,
+            value,
+            ..
+        }: &Sensor,
+    ) -> Self {
+        Self {
+            position_offset,
+            angle: angle.to_degrees(),
+            value,
+        }
+    }
+}
+
+impl From<Sensor> for SensorInfo {
+    fn from(sensor: Sensor) -> Self {
+        (&sensor).into()
+    }
+}
+
+#[derive(Clone, CustomType, Debug)]
+struct Sensors(#[rhai_type(skip)] Vec<SensorInfo>);
 
 impl IntoIterator for Sensors {
-    type Item = Sensor;
+    type Item = SensorInfo;
 
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
@@ -129,82 +160,216 @@ impl IntoIterator for Sensors {
 }
 
 impl Sensors {
-    fn get_sensors(&mut self, index: i64) -> Sensor {
+    fn get_sensors(&mut self, index: i64) -> SensorInfo {
         self.0[index as usize].clone()
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct MouseConfig {
-    max_speed: f32,     // Maximum speed of the mouse (units per second)
-    mass: f32,          // Mass of the mouse
-    wheel_base: f32,    // Distance between the two wheels
-    tire_friction: f32, // Friction coefficient of the tires
-    width: f32,         // Width of the mouse
-    length: f32,        // Length of the mouse (not including the triangle)
-    sensors: Sensors,
-}
+#[derive(Clone, CustomType, Debug)]
+struct MouseData {
+    #[rhai_type(readonly)]
+    wheel_base: f32, // Distance between the wheels
+    #[rhai_type(readonly)]
+    wheel_radius: f32, // Radius of the wheels
+    #[rhai_type(readonly)]
+    ticks_per_revolution: usize, // Encoder resolution (ticks per full wheel revolution)
+    #[rhai_type(readonly)]
+    max_rpm: f32, // Maximum RPM of the motor
+    #[rhai_type(readonly)]
+    motor_torque: f32, // Torque provided by the motor
+    #[rhai_type(readonly)]
+    wheel_inertia: f32, // Rotational inertia of the wheel
+    #[rhai_type(readonly)]
+    tire_friction: f32,
+    #[rhai_type(readonly)]
+    mass: f32, // Mass of the micromouse
 
-#[derive(Clone, CustomType, Debug, Serialize, Deserialize)]
-struct Micromouse {
-    #[rhai_type(skip)]
-    #[serde(with = "Vec2Def")]
-    position: Vec2,
-    #[rhai_type(skip)]
-    direction: f32, // Current direction in radians
-    #[rhai_type(set = Micromouse::set_left_power)]
-    left_power: f32, // Power input to the left wheels (0 to 1)
-    #[rhai_type(set = Micromouse::set_right_power)]
-    right_power: f32, // Power input to the right wheels (0 to 1)
     #[rhai_type(readonly)]
-    left_velocity: f32, // Current velocity of the left wheels
+    left_encoder: usize, // Left wheel encoder tick count
     #[rhai_type(readonly)]
-    right_velocity: f32, // Current velocity of the right wheels
+    right_encoder: usize, // Right wheel encoder tick count
     #[rhai_type(readonly)]
-    max_speed: f32, // Maximum speed of the mouse (units per second)
+    angular_velocity: f32,
+
     #[rhai_type(readonly)]
-    mass: f32, // Mass of the mouse
+    crashed: bool,
+
     #[rhai_type(readonly)]
-    wheel_base: f32, // Distance between the two wheels
-    #[rhai_type(readonly)]
-    tire_friction: f32, // Friction coefficient of the tires
+    delta_time: f32,
+
     #[rhai_type(readonly)]
     width: f32, // Width of the mouse
     #[rhai_type(readonly)]
     length: f32, // Length of the mouse (not including the triangle)
     #[rhai_type(readonly)]
     sensors: Sensors,
+
+    #[rhai_type(set=MouseData::set_left_power, get=MouseData::get_left_power)]
+    left_power: f32,
+
+    #[rhai_type(set=MouseData::set_right_power, get=MouseData::get_right_power)]
+    right_power: f32,
+}
+
+impl MouseData {
+    fn set_left_power(&mut self, power: f32) {
+        self.left_power = power.clamp(-1.0, 1.0);
+    }
+
+    fn get_left_power(&self) -> f32 {
+        self.left_power
+    }
+
+    fn set_right_power(&mut self, power: f32) {
+        self.right_power = power.clamp(-1.0, 1.0);
+    }
+
+    fn get_right_power(&self) -> f32 {
+        self.right_power
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct MouseConfig {
+    wheel_base: f32,             // Distance between the wheels
+    wheel_radius: f32,           // Radius of the wheels
+    ticks_per_revolution: usize, // Encoder resolution (ticks per full wheel revolution)
+    max_rpm: f32,                // Maximum RPM of the motor
+    motor_torque: f32,           // Torque provided by the motor
+    wheel_inertia: f32,          // Rotational inertia of the wheel
+    tire_friction: f32,
+    mass: f32, // Mass of the micromouse
+
+    width: f32,           // Width of the mouse
+    length: f32,          // Length of the mouse (not including the triangle)
+    gyroscope_bias: f32,  // Bias in the gyroscope sensor (to simulate real-world imperfections)
+    gyroscope_noise: f32, // Random noise in the gyroscope sensor (to simulate real-world imperfections)
+
+    sensors: Vec<Sensor>,
+}
+
+struct Micromouse {
+    position: Vec2,
+    width: f32,  // Width of the mouse
+    length: f32, // Length of the mouse (not including the triangle)
+    sensors: Vec<Sensor>,
+
+    tire_friction: f32,
+    orientation: f32,            // Orientation angle in radians
+    left_encoder: usize,         // Left wheel encoder tick count
+    right_encoder: usize,        // Right wheel encoder tick count
+    left_rpm: f32,               // Current RPM of the left motor
+    right_rpm: f32,              // Current RPM of the right motor
+    wheel_base: f32,             // Distance between the wheels
+    wheel_radius: f32,           // Radius of the wheels
+    ticks_per_revolution: usize, // Encoder resolution (ticks per full wheel revolution)
+    max_rpm: f32,                // Maximum RPM of the motor
+    motor_torque: f32,           // Torque provided by the motor
+    wheel_inertia: f32,          // Rotational inertia of the wheel
+    left_power: f32,
+    right_power: f32,
+    mass: f32,            // Mass of the micromouse
+    gyroscope_bias: f32,  // Bias in the gyroscope sensor (to simulate real-world imperfections)
+    gyroscope_noise: f32, // Random noise in the gyroscope sensor (to simulate real-world imperfections)
 }
 
 impl Micromouse {
     fn new(
         MouseConfig {
-            max_speed,
-            mass,
             wheel_base,
-            tire_friction,
             width,
             length,
             sensors,
+            wheel_radius,
+            ticks_per_revolution,
+            max_rpm,
+            motor_torque,
+            wheel_inertia,
+            mass,
+            tire_friction,
+            gyroscope_bias, // Bias in the gyroscope sensor (to simulate real-world imperfections)
+            gyroscope_noise, // Random noise in the gyroscope sensor (to simulate real-world imperfections)
         }: MouseConfig,
         position: Vec2,
-        direction: f32,
+        orientation: f32,
     ) -> Self {
         Self {
             position,
-            direction,
+            wheel_base,
+            width,
+            mass,
+            length,
+            sensors,
+            orientation,
+            wheel_radius,
+            ticks_per_revolution,
+            tire_friction,
+            max_rpm,
+            motor_torque,
+            wheel_inertia,
+            gyroscope_bias,
+            gyroscope_noise,
+            left_encoder: 0,
+            right_encoder: 0,
+            left_rpm: 0.0,
+            right_rpm: 0.0,
             left_power: 0.0,
             right_power: 0.0,
-            left_velocity: 0.0,
-            right_velocity: 0.0,
-            max_speed,
-            mass,
-            wheel_base,
-            tire_friction,
+        }
+    }
+
+    fn get_data(&self, delta_time: f32, crashed: bool) -> MouseData {
+        let Micromouse {
             width,
             length,
             sensors,
+            tire_friction,
+            wheel_base,
+            wheel_radius,
+            ticks_per_revolution,
+            max_rpm,
+            motor_torque,
+            wheel_inertia,
+            left_power,
+            right_power,
+            mass,
+            left_encoder,
+            right_encoder,
+            ..
+        } = &self;
+        MouseData {
+            delta_time,
+            wheel_base: *wheel_base,
+            wheel_radius: *wheel_radius,
+            ticks_per_revolution: *ticks_per_revolution,
+            max_rpm: *max_rpm,
+            motor_torque: *motor_torque,
+            wheel_inertia: *wheel_inertia,
+            tire_friction: *tire_friction,
+            mass: *mass,
+            width: *width,
+            length: *length,
+            sensors: Sensors(sensors.iter().map(Into::into).collect()),
+            left_power: *left_power,
+            right_power: *right_power,
+            left_encoder: *left_encoder,
+            right_encoder: *right_encoder,
+            crashed,
+            angular_velocity: self.get_gyroscope_data(),
         }
+    }
+
+    fn get_gyroscope_data(&self) -> f32 {
+        // Calculate the angular velocity (rad/s) from the difference in wheel speeds
+        let angular_velocity =
+            (self.right_rpm - self.left_rpm) / 60.0 * 2.0 * std::f32::consts::PI / self.wheel_base;
+
+        // Add gyroscope bias and noise to simulate a real gyroscope
+        let noisy_angular_velocity = angular_velocity
+            + self.gyroscope_bias
+            + (self.gyroscope_noise * ::rand::random::<f32>());
+
+        noisy_angular_velocity
     }
 
     fn set_left_power(&mut self, power: f32) {
@@ -215,62 +380,81 @@ impl Micromouse {
         self.right_power = power.clamp(-1.0, 1.0);
     }
 
+    fn update_from_data(&mut self, data: MouseData) {
+        self.set_left_power(data.left_power);
+        self.set_right_power(data.right_power);
+    }
+
     fn update(&mut self, dt: f32, maze_friction: f32) {
-        // Calculate acceleration based on power input and friction
-        let left_acceleration =
-            self.calculate_acceleration(self.left_power, self.left_velocity, maze_friction);
-        let right_acceleration =
-            self.calculate_acceleration(self.right_power, self.right_velocity, maze_friction);
+        // Constants
+        let torque_constant = self.motor_torque; // Proportional constant for torque based on power
+        let max_angular_velocity = (self.max_rpm / 60.0) * 2.0 * std::f32::consts::PI;
 
-        // Update velocities
-        self.left_velocity += left_acceleration * dt;
-        self.right_velocity += right_acceleration * dt;
+        // Combine tire friction and maze friction
+        let combined_friction = self.tire_friction * maze_friction;
 
-        // Cap velocities at max speed
-        self.left_velocity = self.left_velocity.clamp(-self.max_speed, self.max_speed);
-        self.right_velocity = self.right_velocity.clamp(-self.max_speed, self.max_speed);
+        // Calculate the effective torque considering combined friction and mass
+        let effective_torque = |power: f32| -> f32 {
+            let torque = power * torque_constant * combined_friction;
+            torque / self.mass // Adjust torque by mass to simulate inertia
+        };
 
-        // Calculate average speed and turning rate
-        let average_velocity = (self.left_velocity + self.right_velocity) / 2.0;
-        let turning_rate = (self.right_velocity - self.left_velocity) / self.wheel_base;
+        // Calculate torque applied by each motor
+        let left_torque = effective_torque(self.left_power);
+        let right_torque = effective_torque(self.right_power);
 
-        // Update direction and position
-        self.direction += turning_rate * dt;
-        self.position.x += average_velocity * self.direction.cos() * dt;
-        self.position.y += average_velocity * self.direction.sin() * dt;
+        // Calculate angular acceleration for each wheel considering inertia
+        let left_angular_acceleration = left_torque / self.wheel_inertia;
+        let right_angular_acceleration = right_torque / self.wheel_inertia;
 
-        // Apply friction to slow down
-        self.apply_friction(dt, maze_friction);
-    }
+        // Update RPM based on angular acceleration and delta time
+        self.left_rpm += left_angular_acceleration * dt * 60.0 / (2.0 * std::f32::consts::PI);
+        self.right_rpm += right_angular_acceleration * dt * 60.0 / (2.0 * std::f32::consts::PI);
 
-    fn calculate_acceleration(&self, power: f32, current_velocity: f32, maze_friction: f32) -> f32 {
-        // Force applied by the motor (simple model: power * max force)
-        let motor_force = power * self.max_speed;
+        // Clamp RPM to max RPM
+        self.left_rpm = self.left_rpm.clamp(-self.max_rpm, self.max_rpm);
+        self.right_rpm = self.right_rpm.clamp(-self.max_rpm, self.max_rpm);
 
-        // Frictional force
-        let friction_force = (self.tire_friction + maze_friction) * current_velocity.abs();
+        // Calculate actual angular velocity considering the clamped RPM
+        let left_angular_velocity = (self.left_rpm / 60.0) * 2.0 * std::f32::consts::PI;
+        let right_angular_velocity = (self.right_rpm / 60.0) * 2.0 * std::f32::consts::PI;
 
-        // Net force = motor force - frictional force
-        let net_force = motor_force - friction_force.copysign(motor_force);
+        // Ensure the angular velocity does not exceed max_angular_velocity
+        let left_angular_velocity =
+            left_angular_velocity.clamp(-max_angular_velocity, max_angular_velocity);
+        let right_angular_velocity =
+            right_angular_velocity.clamp(-max_angular_velocity, max_angular_velocity);
 
-        // Acceleration = net force / mass
-        net_force / self.mass
-    }
+        // Calculate the linear speeds of the wheels considering combined friction
+        let left_speed = left_angular_velocity * self.wheel_radius * combined_friction;
+        let right_speed = right_angular_velocity * self.wheel_radius * combined_friction;
 
-    fn apply_friction(&mut self, dt: f32, maze_friction: f32) {
-        // Reduce the wheel velocities due to friction
-        let friction_force = self.tire_friction + maze_friction;
+        // Calculate the distance each wheel has traveled in this time step
+        let left_distance = left_speed * dt;
+        let right_distance = right_speed * dt;
 
-        self.left_velocity -= self.left_velocity * friction_force * dt;
-        self.right_velocity -= self.right_velocity * friction_force * dt;
+        // Calculate the change in orientation
+        let delta_orientation = (right_distance - left_distance) / self.wheel_base;
 
-        // Clamp small velocities to zero to simulate stopping due to friction
-        if self.left_velocity.abs() < 0.001 {
-            self.left_velocity = 0.0;
-        }
-        if self.right_velocity.abs() < 0.001 {
-            self.right_velocity = 0.0;
-        }
+        // Update orientation
+        self.orientation += delta_orientation;
+
+        // Calculate the average distance traveled by the micromouse
+        let distance = (left_distance + right_distance) / 2.0;
+
+        // Update position considering the orientation
+        self.position.x += distance * self.orientation.cos();
+        self.position.y += distance * self.orientation.sin();
+
+        // Convert distance traveled to encoder ticks
+        let left_ticks = (left_distance / (2.0 * std::f32::consts::PI * self.wheel_radius)
+            * self.ticks_per_revolution as f32) as usize;
+        let right_ticks = (right_distance / (2.0 * std::f32::consts::PI * self.wheel_radius)
+            * self.ticks_per_revolution as f32) as usize;
+
+        // Update encoder counts
+        self.left_encoder += left_ticks;
+        self.right_encoder += right_ticks;
     }
 }
 
@@ -432,12 +616,12 @@ impl Simulation {
 
         self.mouse.update(dt_scaled, self.maze.friction);
 
-        for sensor in &mut self.mouse.sensors.0 {
+        for sensor in &mut self.mouse.sensors {
             let p = self.mouse.position
                 + sensor
                     .position_offset
-                    .rotate(Vec2::from_angle(self.mouse.direction));
-            let angle = self.mouse.direction + sensor.angle;
+                    .rotate(Vec2::from_angle(self.mouse.orientation));
+            let angle = self.mouse.orientation + sensor.angle;
             let r = Ray {
                 origin: p,
                 direction: Vec2::from_angle(angle),
@@ -469,15 +653,15 @@ impl Simulation {
 
         // Calculate the corners of the rectangle
         let rear_left = mouse.position
-            + vec2(-half_length, -half_width).rotate(Vec2::from_angle(mouse.direction));
+            + vec2(-half_length, -half_width).rotate(Vec2::from_angle(mouse.orientation));
         let rear_right = mouse.position
-            + vec2(-half_length, half_width).rotate(Vec2::from_angle(mouse.direction));
+            + vec2(-half_length, half_width).rotate(Vec2::from_angle(mouse.orientation));
         let front_left = mouse.position
-            + vec2(half_length, -half_width).rotate(Vec2::from_angle(mouse.direction));
+            + vec2(half_length, -half_width).rotate(Vec2::from_angle(mouse.orientation));
         let front_right = mouse.position
-            + vec2(half_length, half_width).rotate(Vec2::from_angle(mouse.direction));
+            + vec2(half_length, half_width).rotate(Vec2::from_angle(mouse.orientation));
         let front_center = mouse.position
-            + vec2(half_length + half_width, 0.0).rotate(Vec2::from_angle(mouse.direction));
+            + vec2(half_length + half_width, 0.0).rotate(Vec2::from_angle(mouse.orientation));
 
         let r1 = rear_left;
         let r2 = front_left;
@@ -563,15 +747,15 @@ impl Simulation {
 
         // Calculate the corners of the rectangle
         let rear_left = mouse.position
-            + vec2(-half_length, -half_width).rotate(Vec2::from_angle(mouse.direction));
+            + vec2(-half_length, -half_width).rotate(Vec2::from_angle(mouse.orientation));
         let rear_right = mouse.position
-            + vec2(-half_length, half_width).rotate(Vec2::from_angle(mouse.direction));
+            + vec2(-half_length, half_width).rotate(Vec2::from_angle(mouse.orientation));
         let front_left = mouse.position
-            + vec2(half_length, -half_width).rotate(Vec2::from_angle(mouse.direction));
+            + vec2(half_length, -half_width).rotate(Vec2::from_angle(mouse.orientation));
         let front_right = mouse.position
-            + vec2(half_length, half_width).rotate(Vec2::from_angle(mouse.direction));
+            + vec2(half_length, half_width).rotate(Vec2::from_angle(mouse.orientation));
         let front_center = mouse.position
-            + vec2(half_length + half_width, 0.0).rotate(Vec2::from_angle(mouse.direction));
+            + vec2(half_length + half_width, 0.0).rotate(Vec2::from_angle(mouse.orientation));
 
         // Draw the rectangle part of the mouse
         draw_triangle(
@@ -595,11 +779,11 @@ impl Simulation {
             BLUE,
         );
 
-        for sensor in &self.mouse.sensors.0 {
+        for sensor in &self.mouse.sensors {
             let p1 = self.mouse.position
                 + sensor
                     .position_offset
-                    .rotate(Vec2::from_angle(mouse.direction));
+                    .rotate(Vec2::from_angle(mouse.orientation));
             let p2 = sensor.closest_point;
             draw_line(
                 p1.x + 5.0,
@@ -651,9 +835,20 @@ impl Simulation {
 
 #[derive(Parser)]
 struct Args {
-    maze: PathBuf,
-    mouse: PathBuf,
-    script: PathBuf,
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Clone)]
+enum Command {
+    ExampleMouse,
+    ExampleMaze,
+    ExampleScript,
+    Simulate {
+        maze: PathBuf,
+        mouse: PathBuf,
+        script: PathBuf,
+    },
 }
 
 fn parse_maze(s: &str) -> Maze {
@@ -770,53 +965,64 @@ fn parse_maze(s: &str) -> Maze {
 async fn main() {
     let args = Args::parse();
 
-    let maze = std::fs::read_to_string(args.maze).unwrap();
-    let maze = parse_maze(&maze);
+    match args.command {
+        Command::ExampleScript => println!("{}", include_str!("../test_data/test.rhai")),
+        Command::ExampleMouse => println!("{}", include_str!("../test_data/mouse.toml")),
+        Command::ExampleMaze => println!("{}", include_str!("../test_data/example.maze")),
+        Command::Simulate {
+            maze,
+            mouse,
+            script,
+        } => {
+            let maze = std::fs::read_to_string(maze).unwrap();
+            let maze = parse_maze(&maze);
 
-    let mouse_config: MouseConfig =
-        toml::from_str(&std::fs::read_to_string(args.mouse).unwrap()).unwrap();
+            let mouse_config: MouseConfig =
+                toml::from_str(&std::fs::read_to_string(mouse).unwrap()).unwrap();
 
-    std::fs::write("mouse.toml", toml::to_string_pretty(&mouse_config).unwrap()).unwrap();
+            let mut sim = Simulation::new(script, maze, mouse_config); // Create a 10x10 maze
 
-    let mut sim = Simulation::new(args.script, maze, mouse_config); // Create a 10x10 maze
+            let mut paused = true;
 
-    let mut paused = true;
+            // Update the simulation
+            sim.update(0.0);
 
-    // Update the simulation
-    sim.update(0.0);
+            loop {
+                if is_key_pressed(KeyCode::Space) {
+                    paused = !paused;
+                }
 
-    loop {
-        if is_key_pressed(KeyCode::Space) {
-            paused = !paused;
+                let dt = get_frame_time();
+                if !paused && !sim.collided {
+                    let mut scope = Scope::new();
+                    let mut mouse_data = sim.mouse.get_data(dt, sim.collided);
+                    scope.push("mouse", mouse_data);
+
+                    sim.engine.run_ast_with_scope(&mut scope, &sim.ast).unwrap();
+
+                    mouse_data = scope.get_value("mouse").unwrap();
+                    sim.mouse.update_from_data(mouse_data);
+
+                    sim.update(dt);
+                }
+
+                // Render the simulation
+                sim.render();
+
+                // Control the simulation speed (Q to slow down, E to speed up)
+                if is_key_pressed(KeyCode::Q) {
+                    sim.time_scale = (sim.time_scale * 0.9).max(0.1);
+                } else if is_key_pressed(KeyCode::E) {
+                    sim.time_scale = (sim.time_scale * 1.1).min(10.0);
+                }
+
+                // Exit the simulation with ESC
+                if is_key_pressed(KeyCode::Escape) {
+                    break;
+                }
+
+                next_frame().await;
+            }
         }
-
-        let dt = get_frame_time();
-        if !paused && !sim.collided {
-            let mut scope = Scope::new();
-            scope.push("mouse", sim.mouse.clone());
-
-            sim.engine.run_ast_with_scope(&mut scope, &sim.ast).unwrap();
-
-            sim.mouse = scope.get_value("mouse").unwrap();
-
-            sim.update(dt);
-        }
-
-        // Render the simulation
-        sim.render();
-
-        // Control the simulation speed (Q to slow down, E to speed up)
-        if is_key_pressed(KeyCode::Q) {
-            sim.time_scale = (sim.time_scale * 0.9).max(0.1);
-        } else if is_key_pressed(KeyCode::E) {
-            sim.time_scale = (sim.time_scale * 1.1).min(10.0);
-        }
-
-        // Exit the simulation with ESC
-        if is_key_pressed(KeyCode::Escape) {
-            break;
-        }
-
-        next_frame().await;
     }
 }
