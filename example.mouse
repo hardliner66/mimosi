@@ -1,0 +1,47 @@
+MouseConfig {
+  max_speed: 2000,
+  mass: 1,
+  wheel_base: 25,
+  tire_friction: 0.8,
+  width: 15,
+  length: 25,
+  sensors: Sensors(
+    [
+      Sensor {
+        position_offset: Vec2Def {
+          x: 12.5,
+          y: 7.5
+        },
+        angle: 0.7853982
+      },
+      Sensor {
+        position_offset: Vec2Def {
+          x: 12.5,
+          y: -7.5
+        },
+        angle: 5.497787
+      },
+      Sensor {
+        position_offset: Vec2Def {
+          x: -12.5,
+          y: -7.5
+        },
+        angle: 3.926991
+      },
+      Sensor {
+        position_offset: Vec2Def {
+          x: -12.5,
+          y: 7.5
+        },
+        angle: 2.3561945
+      },
+      Sensor {
+        position_offset: Vec2Def {
+          x: 20,
+          y: 0
+        },
+        angle: 0
+      }
+    ]
+  )
+}

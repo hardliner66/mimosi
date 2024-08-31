@@ -5,7 +5,6 @@ use std::{
 };
 
 use clap::Parser;
-use egui::TextBuffer;
 use macroquad::prelude::*;
 use rhai::{
     packages::{CorePackage, Package},
@@ -13,14 +12,14 @@ use rhai::{
 };
 use serde::{Deserialize, Serialize};
 
-const RIGHT: f32 = 0.0;
-const UP_RIGHT: f32 = std::f32::consts::FRAC_PI_4;
-const UP: f32 = std::f32::consts::FRAC_PI_2;
-const UP_LEFT: f32 = UP + std::f32::consts::FRAC_PI_4;
-const LEFT: f32 = std::f32::consts::PI;
-const DOWN_LEFT: f32 = LEFT + std::f32::consts::FRAC_PI_4;
-const DOWN: f32 = 3.0 * std::f32::consts::FRAC_PI_2;
-const DOWN_RIGHT: f32 = DOWN + std::f32::consts::FRAC_PI_4;
+// const RIGHT: f32 = 0.0;
+// const UP_RIGHT: f32 = std::f32::consts::FRAC_PI_4;
+// const UP: f32 = std::f32::consts::FRAC_PI_2;
+// const UP_LEFT: f32 = UP + std::f32::consts::FRAC_PI_4;
+// const LEFT: f32 = std::f32::consts::PI;
+// const DOWN_LEFT: f32 = LEFT + std::f32::consts::FRAC_PI_4;
+// const DOWN: f32 = 3.0 * std::f32::consts::FRAC_PI_2;
+// const DOWN_RIGHT: f32 = DOWN + std::f32::consts::FRAC_PI_4;
 
 pub fn build_engine() -> Engine {
     let mut engine = Engine::new();
@@ -109,6 +108,7 @@ struct Sensor {
     #[rhai_type(readonly)]
     angle: f32, // Angle in radians
     #[rhai_type(readonly)]
+    #[serde(skip)]
     value: f32,
     #[rhai_type(skip)]
     #[serde(skip)]
@@ -132,6 +132,17 @@ impl Sensors {
     fn get_sensors(&mut self, index: i64) -> Sensor {
         self.0[index as usize].clone()
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct MouseConfig {
+    max_speed: f32,     // Maximum speed of the mouse (units per second)
+    mass: f32,          // Mass of the mouse
+    wheel_base: f32,    // Distance between the two wheels
+    tire_friction: f32, // Friction coefficient of the tires
+    width: f32,         // Width of the mouse
+    length: f32,        // Length of the mouse (not including the triangle)
+    sensors: Sensors,
 }
 
 #[derive(Clone, CustomType, Debug, Serialize, Deserialize)]
@@ -166,13 +177,19 @@ struct Micromouse {
 }
 
 impl Micromouse {
-    fn new(position: Vec2, direction: f32) -> Self {
-        let width = 15.0;
-        let length = 25.0;
-
-        let half_width = width / 2.0;
-        let half_length = length / 2.0;
-
+    fn new(
+        MouseConfig {
+            max_speed,
+            mass,
+            wheel_base,
+            tire_friction,
+            width,
+            length,
+            sensors,
+        }: MouseConfig,
+        position: Vec2,
+        direction: f32,
+    ) -> Self {
         Self {
             position,
             direction,
@@ -180,57 +197,13 @@ impl Micromouse {
             right_power: 0.0,
             left_velocity: 0.0,
             right_velocity: 0.0,
-            max_speed: 2000.0,
-            mass: 1.0,
-            wheel_base: 25.0,
-            tire_friction: 0.8,
+            max_speed,
+            mass,
+            wheel_base,
+            tire_friction,
             width,
             length,
-            sensors: Sensors(
-                [
-                    Sensor {
-                        position_offset: Vec2 {
-                            x: half_length,
-                            y: half_width,
-                        },
-                        angle: UP_RIGHT,
-                        ..Default::default()
-                    },
-                    Sensor {
-                        position_offset: Vec2 {
-                            x: half_length,
-                            y: -half_width,
-                        },
-                        angle: DOWN_RIGHT,
-                        ..Default::default()
-                    },
-                    Sensor {
-                        position_offset: Vec2 {
-                            x: -half_length,
-                            y: -half_width,
-                        },
-                        angle: DOWN_LEFT,
-                        ..Default::default()
-                    },
-                    Sensor {
-                        position_offset: Vec2 {
-                            x: -half_length,
-                            y: half_width,
-                        },
-                        angle: UP_LEFT,
-                        ..Default::default()
-                    },
-                    Sensor {
-                        position_offset: Vec2 {
-                            x: half_length + half_width,
-                            y: 0.0,
-                        },
-                        angle: RIGHT,
-                        ..Default::default()
-                    },
-                ]
-                .to_vec(),
-            ),
+            sensors,
         }
     }
 
@@ -355,108 +328,6 @@ struct Maze {
     finish: Rectangle,
 }
 
-fn cell_walls_to_walls(cell_position: Vec2, cell_walls: CellWalls, cell_size: f32) -> Vec<Wall> {
-    let mut walls = Vec::new();
-
-    if cell_walls.north {
-        walls.push(
-            Rectangle {
-                p1: Vec2 {
-                    x: cell_position.x,
-                    y: cell_position.y + cell_size,
-                },
-                p2: Vec2 {
-                    x: cell_position.x + cell_size,
-                    y: cell_position.y + cell_size,
-                },
-                p3: Vec2 {
-                    x: cell_position.x + cell_size,
-                    y: cell_position.y + cell_size + 2.0,
-                },
-                p4: Vec2 {
-                    x: cell_position.x,
-                    y: cell_position.y + cell_size + 2.0,
-                },
-            }
-            .into(),
-        );
-    }
-
-    if cell_walls.south {
-        walls.push(
-            Rectangle {
-                p1: Vec2 {
-                    x: cell_position.x,
-                    y: cell_position.y,
-                },
-                p2: Vec2 {
-                    x: cell_position.x + cell_size,
-                    y: cell_position.y,
-                },
-                p3: Vec2 {
-                    x: cell_position.x + cell_size,
-                    y: cell_position.y + 2.0,
-                },
-                p4: Vec2 {
-                    x: cell_position.x,
-                    y: cell_position.y + 2.0,
-                },
-            }
-            .into(),
-        );
-    }
-
-    if cell_walls.east {
-        walls.push(
-            Rectangle {
-                p1: Vec2 {
-                    x: cell_position.x + cell_size,
-                    y: cell_position.y,
-                },
-                p2: Vec2 {
-                    x: cell_position.x + cell_size,
-                    y: cell_position.y + cell_size,
-                },
-                p3: Vec2 {
-                    x: cell_position.x + cell_size + 2.0,
-                    y: cell_position.y + cell_size,
-                },
-                p4: Vec2 {
-                    x: cell_position.x + cell_size + 2.0,
-                    y: cell_position.y,
-                },
-            }
-            .into(),
-        );
-    }
-
-    if cell_walls.west {
-        walls.push(
-            Rectangle {
-                p1: Vec2 {
-                    x: cell_position.x,
-                    y: cell_position.y,
-                },
-                p2: Vec2 {
-                    x: cell_position.x,
-                    y: cell_position.y + cell_size,
-                },
-                p3: Vec2 {
-                    x: cell_position.x + 2.0,
-                    y: cell_position.y + cell_size,
-                },
-                p4: Vec2 {
-                    x: cell_position.x + 2.0,
-                    y: cell_position.y,
-                },
-            }
-            .into(),
-        );
-    }
-
-    walls
-}
-
 // Function to check if two line segments intersect
 fn lines_intersect(p1: Vec2, p2: Vec2, q1: Vec2, q2: Vec2) -> bool {
     fn orientation(a: Vec2, b: Vec2, c: Vec2) -> i32 {
@@ -533,11 +404,12 @@ struct Simulation {
 }
 
 impl Simulation {
-    fn new<P: AsRef<Path>>(script: P, maze: Maze) -> Self {
+    fn new<P: AsRef<Path>>(script: P, maze: Maze, mouse_config: MouseConfig) -> Self {
         let engine = build_engine();
         let ast = engine.compile_file(script.as_ref().to_path_buf()).unwrap();
         Self {
             mouse: Micromouse::new(
+                mouse_config,
                 maze.start,
                 match maze.start_direction {
                     StartDirection::Up => UP,
@@ -780,6 +652,7 @@ impl Simulation {
 #[derive(Parser)]
 struct Args {
     maze: PathBuf,
+    mouse: PathBuf,
     script: PathBuf,
 }
 
@@ -898,10 +771,12 @@ async fn main() {
     let args = Args::parse();
 
     let maze = std::fs::read_to_string(args.maze).unwrap();
-
     let maze = parse_maze(&maze);
 
-    let mut sim = Simulation::new(args.script, maze); // Create a 10x10 maze
+    let mouse_config: MouseConfig =
+        rsn::from_str(&std::fs::read_to_string(args.mouse).unwrap()).unwrap();
+
+    let mut sim = Simulation::new(args.script, maze, mouse_config); // Create a 10x10 maze
 
     let mut paused = true;
 
