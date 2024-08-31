@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fmt::Debug,
     ops::Deref,
     path::{Path, PathBuf},
@@ -8,7 +9,7 @@ use clap::{Parser, Subcommand};
 use macroquad::prelude::*;
 use rhai::{
     packages::{CorePackage, Package},
-    CustomType, Engine, Scope, TypeBuilder, AST,
+    CustomType, Dynamic, Engine, Scope, TypeBuilder, AST,
 };
 use serde::{Deserialize, Serialize};
 
@@ -125,7 +126,7 @@ struct SensorInfo {
 
 impl From<&Sensor> for SensorInfo {
     fn from(
-        &Sensor {
+        Sensor {
             position_offset,
             angle,
             value,
@@ -133,9 +134,9 @@ impl From<&Sensor> for SensorInfo {
         }: &Sensor,
     ) -> Self {
         Self {
-            position_offset,
+            position_offset: *position_offset,
             angle: angle.to_degrees(),
-            value,
+            value: *value,
         }
     }
 }
@@ -147,12 +148,12 @@ impl From<Sensor> for SensorInfo {
 }
 
 #[derive(Clone, CustomType, Debug)]
-struct Sensors(#[rhai_type(skip)] Vec<SensorInfo>);
+struct Sensors(#[rhai_type(skip)] HashMap<String, SensorInfo>);
 
 impl IntoIterator for Sensors {
-    type Item = SensorInfo;
+    type Item = (String, SensorInfo);
 
-    type IntoIter = std::vec::IntoIter<Self::Item>;
+    type IntoIter = std::collections::hash_map::IntoIter<String, SensorInfo>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
@@ -160,8 +161,8 @@ impl IntoIterator for Sensors {
 }
 
 impl Sensors {
-    fn get_sensors(&mut self, index: i64) -> SensorInfo {
-        self.0[index as usize].clone()
+    fn get_sensors(&mut self, index: &str) -> SensorInfo {
+        self.0[index].clone()
     }
 }
 
@@ -245,14 +246,14 @@ struct MouseConfig {
     gyroscope_bias: f32,  // Bias in the gyroscope sensor (to simulate real-world imperfections)
     gyroscope_noise: f32, // Random noise in the gyroscope sensor (to simulate real-world imperfections)
 
-    sensors: Vec<Sensor>,
+    sensors: HashMap<String, Sensor>,
 }
 
 struct Micromouse {
     position: Vec2,
     width: f32,  // Width of the mouse
     length: f32, // Length of the mouse (not including the triangle)
-    sensors: Vec<Sensor>,
+    sensors: HashMap<String, Sensor>,
 
     tire_friction: f32,
     orientation: f32,            // Orientation angle in radians
@@ -299,7 +300,18 @@ impl Micromouse {
             width,
             mass,
             length,
-            sensors,
+            sensors: sensors
+                .into_iter()
+                .map(|(n, s)| {
+                    (
+                        n,
+                        Sensor {
+                            angle: s.angle.to_radians(),
+                            ..s
+                        },
+                    )
+                })
+                .collect(),
             orientation,
             wheel_radius,
             ticks_per_revolution,
@@ -349,7 +361,12 @@ impl Micromouse {
             mass: *mass,
             width: *width,
             length: *length,
-            sensors: Sensors(sensors.iter().map(Into::into).collect()),
+            sensors: Sensors(
+                sensors
+                    .iter()
+                    .map(|(n, v)| (n.clone(), SensorInfo::from(v)))
+                    .collect(),
+            ),
             left_power: *left_power,
             right_power: *right_power,
             left_encoder: *left_encoder,
@@ -434,7 +451,7 @@ impl Micromouse {
         let right_distance = right_speed * dt;
 
         // Calculate the change in orientation
-        let delta_orientation = (right_distance - left_distance) / self.wheel_base;
+        let delta_orientation = (left_distance - right_distance) / self.wheel_base;
 
         // Update orientation
         self.orientation += delta_orientation;
@@ -616,7 +633,7 @@ impl Simulation {
 
         self.mouse.update(dt_scaled, self.maze.friction);
 
-        for sensor in &mut self.mouse.sensors {
+        for (_, sensor) in &mut self.mouse.sensors {
             let p = self.mouse.position
                 + sensor
                     .position_offset
@@ -779,7 +796,7 @@ impl Simulation {
             BLUE,
         );
 
-        for sensor in &self.mouse.sensors {
+        for (_, sensor) in &self.mouse.sensors {
             let p1 = self.mouse.position
                 + sensor
                     .position_offset
@@ -987,6 +1004,9 @@ async fn main() {
             // Update the simulation
             sim.update(0.0);
 
+            let mut scope = Scope::new();
+            scope.push_dynamic("state", Dynamic::from_map(Default::default()));
+
             loop {
                 if is_key_pressed(KeyCode::Space) {
                     paused = !paused;
@@ -994,7 +1014,6 @@ async fn main() {
 
                 let dt = get_frame_time();
                 if !paused && !sim.collided {
-                    let mut scope = Scope::new();
                     let mut mouse_data = sim.mouse.get_data(dt, sim.collided);
                     scope.push("mouse", mouse_data);
 

@@ -1,7 +1,7 @@
 wheel_base = 25.0
 wheel_radius = 5.0
 ticks_per_revolution = 360
-max_rpm = 3000.0
+max_rpm = 300.0
 motor_torque = 1.0
 wheel_inertia = 0.01
 tire_friction = 0.8
@@ -11,37 +11,37 @@ length = 25.0
 gyroscope_bias= 0.01  # Small bias in rad/s
 gyroscope_noise= 0.005 # Random noise in rad/s
 
-[[sensors]]
-angle = 0.7853981852531433
+[sensors.FRONT_RIGHT]
+angle = 45.0
 
-[sensors.position_offset]
+[sensors.FRONT_RIGHT.position_offset]
 x = 12.5
 y = 7.5
 
-[[sensors]]
-angle = 5.497786998748779
+[sensors.FRONT_LEFT]
+angle = 315.0
 
-[sensors.position_offset]
+[sensors.FRONT_LEFT.position_offset]
 x = 12.5
 y = -7.5
 
-[[sensors]]
-angle = 3.9269909858703613
+[sensors.BACK_LEFT]
+angle = 225.0
 
-[sensors.position_offset]
+[sensors.BACK_LEFT.position_offset]
 x = -12.5
 y = -7.5
 
-[[sensors]]
-angle = 2.356194496154785
+[sensors.BACK_RIGHT]
+angle = 135.0
 
-[sensors.position_offset]
+[sensors.BACK_RIGHT.position_offset]
 x = -12.5
 y = 7.5
 
-[[sensors]]
+[sensors.FRONT]
 angle = 0.0
 
-[sensors.position_offset]
+[sensors.FRONT.position_offset]
 x = 20.0
 y = 0.0
