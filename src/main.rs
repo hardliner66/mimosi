@@ -5,6 +5,7 @@ use std::{
 };
 
 use clap::Parser;
+use egui::TextBuffer;
 use macroquad::prelude::*;
 use rhai::{
     packages::{CorePackage, Package},
@@ -300,23 +301,7 @@ impl Micromouse {
     }
 }
 
-struct MazeGenerator {
-    width: usize,
-    height: usize,
-    cell_size: f32,
-    cells: Vec<Vec<CellWalls>>, // 2D grid representing walls in each cell
-    friction: f32,              // Friction coefficient of the maze surface
-}
-
-#[derive(Clone, Copy, Default)]
-struct CellWalls {
-    north: bool,
-    south: bool,
-    east: bool,
-    west: bool,
-}
-
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 enum StartDirection {
     Up,
     Right,
@@ -324,7 +309,7 @@ enum StartDirection {
     Left,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Wall(Rectangle);
 
 impl Deref for Wall {
@@ -342,7 +327,7 @@ struct Vec2Def {
     y: f32,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, Debug)]
 struct Rectangle {
     #[serde(with = "Vec2Def")]
     p1: Vec2,
@@ -360,7 +345,7 @@ impl From<Rectangle> for Wall {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Maze {
     walls: Vec<Wall>, // 2D grid representing walls in each cell
     friction: f32,    // Friction coefficient of the maze surface
@@ -472,77 +457,6 @@ fn cell_walls_to_walls(cell_position: Vec2, cell_walls: CellWalls, cell_size: f3
     walls
 }
 
-impl From<MazeGenerator> for Maze {
-    fn from(
-        MazeGenerator {
-            width,
-            height,
-            cell_size,
-            cells,
-            friction,
-        }: MazeGenerator,
-    ) -> Self {
-        let mut walls = Vec::new();
-        walls.push(
-            Rectangle {
-                p1: vec2(0.0, 0.0),
-                p2: vec2(width as f32 * cell_size, 0.0),
-                p3: vec2(width as f32 * cell_size, 0.0),
-                p4: vec2(0.0, 0.0),
-            }
-            .into(),
-        );
-
-        walls.push(
-            Rectangle {
-                p1: vec2(0.0, 0.0),
-                p2: vec2(0.0, height as f32 * cell_size),
-                p3: vec2(0.0, height as f32 * cell_size),
-                p4: vec2(0.0, 0.0),
-            }
-            .into(),
-        );
-
-        walls.push(
-            Rectangle {
-                p1: vec2(width as f32 * cell_size, height as f32 * cell_size),
-                p2: vec2(width as f32 * cell_size, 0.0),
-                p3: vec2(width as f32 * cell_size, 0.0),
-                p4: vec2(width as f32 * cell_size, height as f32 * cell_size),
-            }
-            .into(),
-        );
-
-        walls.push(
-            Rectangle {
-                p1: vec2(width as f32 * cell_size, height as f32 * cell_size),
-                p2: vec2(0.0, height as f32 * cell_size),
-                p3: vec2(0.0, height as f32 * cell_size),
-                p4: vec2(width as f32 * cell_size, height as f32 * cell_size),
-            }
-            .into(),
-        );
-
-        for (i, row) in cells.iter().enumerate() {
-            for (j, cell) in row.iter().enumerate() {
-                walls.append(&mut cell_walls_to_walls(
-                    vec2(i as f32 * 50.0, j as f32 * 50.0),
-                    *cell,
-                    50.0,
-                ));
-            }
-        }
-
-        Self {
-            walls,
-            friction,
-            finish: Rectangle::default(),
-            start: Vec2::default(),
-            start_direction: StartDirection::Right,
-        }
-    }
-}
-
 // Function to check if two line segments intersect
 fn lines_intersect(p1: Vec2, p2: Vec2, q1: Vec2, q2: Vec2) -> bool {
     fn orientation(a: Vec2, b: Vec2, c: Vec2) -> i32 {
@@ -612,6 +526,7 @@ struct Simulation {
     engine: Engine,
     mouse: Micromouse,
     collided: bool,
+    finished: bool,
     maze: Maze,
     time_scale: f32, // Speed factor for the simulation and replay
     ast: AST,
@@ -632,6 +547,7 @@ impl Simulation {
                 },
             ),
             collided: false,
+            finished: false,
             maze,
             time_scale: 1.0,
             engine,
@@ -662,6 +578,14 @@ impl Simulation {
 
         if self.check_collisions() {
             self.collided = true;
+        }
+
+        if self.mouse.position.x >= self.maze.finish.p1.x
+            && self.mouse.position.y >= self.maze.finish.p1.y
+            && self.mouse.position.x <= self.maze.finish.p3.x
+            && self.mouse.position.y <= self.maze.finish.p3.y
+        {
+            self.finished = true;
         }
     }
 
@@ -715,14 +639,52 @@ impl Simulation {
 
     fn render_maze(&self) {
         for wall in &self.maze.walls {
-            draw_line(wall.p1.x, wall.p1.y, wall.p2.x, wall.p2.y, 1.0, BLACK);
-            draw_line(wall.p2.x, wall.p2.y, wall.p3.x, wall.p3.y, 1.0, BLACK);
-            draw_line(wall.p3.x, wall.p3.y, wall.p4.x, wall.p4.y, 1.0, BLACK);
-            draw_line(wall.p4.x, wall.p4.y, wall.p1.x, wall.p1.y, 1.0, BLACK);
+            draw_line(
+                wall.p1.x + 5.0,
+                wall.p1.y + 5.0,
+                wall.p2.x + 5.0,
+                wall.p2.y + 5.0,
+                1.0,
+                BLACK,
+            );
+            draw_line(
+                wall.p2.x + 5.0,
+                wall.p2.y + 5.0,
+                wall.p3.x + 5.0,
+                wall.p3.y + 5.0,
+                1.0,
+                BLACK,
+            );
+            draw_line(
+                wall.p3.x + 5.0,
+                wall.p3.y + 5.0,
+                wall.p4.x + 5.0,
+                wall.p4.y + 5.0,
+                1.0,
+                BLACK,
+            );
+            draw_line(
+                wall.p4.x + 5.0,
+                wall.p4.y + 5.0,
+                wall.p1.x + 5.0,
+                wall.p1.y + 5.0,
+                1.0,
+                BLACK,
+            );
+
+            draw_rectangle_lines(
+                self.maze.finish.p1.x + 5.0,
+                self.maze.finish.p1.y + 5.0,
+                self.maze.finish.p3.x - self.maze.finish.p1.x,
+                self.maze.finish.p3.y - self.maze.finish.p1.y,
+                2.0,
+                GREEN,
+            );
         }
     }
 
     fn render_mouse(&self) {
+        let offset = vec2(5.0, 5.0);
         let mouse = &self.mouse;
         let half_width = mouse.width / 2.0;
         let half_length = mouse.length / 2.0;
@@ -740,11 +702,26 @@ impl Simulation {
             + vec2(half_length + half_width, 0.0).rotate(Vec2::from_angle(mouse.direction));
 
         // Draw the rectangle part of the mouse
-        draw_triangle(rear_left, rear_right, front_right, RED);
-        draw_triangle(rear_left, front_left, front_right, RED);
+        draw_triangle(
+            rear_left + offset,
+            rear_right + offset,
+            front_right + offset,
+            RED,
+        );
+        draw_triangle(
+            rear_left + offset,
+            front_left + offset,
+            front_right + offset,
+            RED,
+        );
 
         // Draw the triangular front
-        draw_triangle(front_left, front_right, front_center, BLUE);
+        draw_triangle(
+            front_left + offset,
+            front_right + offset,
+            front_center + offset,
+            BLUE,
+        );
 
         for sensor in &self.mouse.sensors.0 {
             let p1 = self.mouse.position
@@ -752,25 +729,49 @@ impl Simulation {
                     .position_offset
                     .rotate(Vec2::from_angle(mouse.direction));
             let p2 = sensor.closest_point;
-            draw_line(p1.x, p1.y, p2.x, p2.y, 2.0, DARKPURPLE);
+            draw_line(
+                p1.x + 5.0,
+                p1.y + 5.0,
+                p2.x + 5.0,
+                p2.y + 5.0,
+                2.0,
+                DARKPURPLE,
+            );
         }
 
         if self.collided {
             draw_line(
-                rear_left.x,
-                rear_left.y,
-                front_right.x,
-                front_right.y,
+                rear_left.x + 5.0,
+                rear_left.y + 5.0,
+                front_right.x + 5.0,
+                front_right.y + 5.0,
                 2.0,
                 BLACK,
             );
             draw_line(
-                rear_right.x,
-                rear_right.y,
-                front_left.x,
-                front_left.y,
+                rear_right.x + 5.0,
+                rear_right.y + 5.0,
+                front_left.x + 5.0,
+                front_left.y + 5.0,
                 2.0,
                 BLACK,
+            );
+        } else if self.finished {
+            draw_line(
+                rear_left.x + 5.0,
+                rear_left.y + 5.0,
+                front_right.x + 5.0,
+                front_right.y + 5.0,
+                2.0,
+                GREEN,
+            );
+            draw_line(
+                rear_right.x + 5.0,
+                rear_right.y + 5.0,
+                front_left.x + 5.0,
+                front_left.y + 5.0,
+                2.0,
+                GREEN,
             );
         }
     }
@@ -778,33 +779,129 @@ impl Simulation {
 
 #[derive(Parser)]
 struct Args {
-    path: PathBuf,
+    maze: PathBuf,
+    script: PathBuf,
+}
+
+fn parse_maze(s: &str) -> Maze {
+    let mut friction = 1.0;
+    let mut start = vec2(0.0, 0.0);
+    let mut start_direction = StartDirection::Right;
+    let mut walls = Vec::new();
+    let mut finish = Rectangle::default();
+
+    for line in s.lines() {
+        if let Some((left, right)) = line.split_once(":") {
+            let left = left.trim().to_uppercase();
+            match left.as_str() {
+                "SP" => {
+                    if let Some((left, right)) = right.split_once(",") {
+                        start = vec2(left.trim().parse().unwrap(), right.parse().unwrap()) * 50.0
+                            + vec2(25.0, 25.0);
+                    }
+                }
+                "SD" => {
+                    start_direction = match right.trim().to_uppercase().as_str() {
+                        "L" => StartDirection::Left,
+                        "U" => StartDirection::Up,
+                        "D" => StartDirection::Down,
+                        _ => StartDirection::Right,
+                    };
+                }
+                "FI" => {
+                    if let Some((left, right)) = right.split_once(";") {
+                        let size: f32 = right.trim().parse().unwrap();
+                        if let Some((left, right)) = left.split_once(",") {
+                            let x: f32 = left.trim().parse().unwrap();
+                            let y: f32 = right.trim().parse().unwrap();
+                            finish.p1.x = x;
+                            finish.p1.y = y;
+                            finish.p2.x = x + size;
+                            finish.p2.y = y;
+                            finish.p3.x = x + size;
+                            finish.p3.y = y + size;
+                            finish.p4.x = x + size;
+                            finish.p4.y = y;
+
+                            finish.p1 *= 50.0;
+                            finish.p2 *= 50.0;
+                            finish.p3 *= 50.0;
+                            finish.p4 *= 50.0;
+                        }
+                    }
+                }
+                "FR" => {
+                    friction = right.trim().parse().unwrap();
+                }
+                _ => {
+                    if left.starts_with(".R") {
+                        let row: f32 = left[2..].parse().unwrap();
+                        for (min, max) in right.split(",").flat_map(|s| {
+                            if let Some((left, right)) = s.split_once("-") {
+                                Some((
+                                    left.trim().parse::<u32>().unwrap(),
+                                    right.trim().parse::<u32>().unwrap(),
+                                ))
+                            } else {
+                                None
+                            }
+                        }) {
+                            walls.push(
+                                Rectangle {
+                                    p1: vec2(min as f32, row) * 50.0,
+                                    p2: vec2(max as f32, row) * 50.0,
+                                    p3: vec2(max as f32, row) * 50.0 + vec2(0.0, 1.0),
+                                    p4: vec2(min as f32, row) * 50.0 + vec2(0.0, 1.0),
+                                }
+                                .into(),
+                            );
+                        }
+                    } else if left.starts_with(".C") {
+                        let col: f32 = left[2..].parse().unwrap();
+                        for (min, max) in right.split(",").flat_map(|s| {
+                            if let Some((left, right)) = s.split_once("-") {
+                                Some((
+                                    left.trim().parse::<u32>().unwrap(),
+                                    right.trim().parse::<u32>().unwrap(),
+                                ))
+                            } else {
+                                None
+                            }
+                        }) {
+                            walls.push(
+                                Rectangle {
+                                    p1: vec2(col, min as f32) * 50.0,
+                                    p2: vec2(col, max as f32) * 50.0,
+                                    p3: vec2(col, max as f32) * 50.0 + vec2(1.0, 0.0),
+                                    p4: vec2(col, min as f32) * 50.0 + vec2(1.0, 0.0),
+                                }
+                                .into(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Maze {
+        friction,
+        start,
+        walls,
+        start_direction,
+        finish,
+    }
 }
 
 #[macroquad::main("Micromouse Simulation")]
 async fn main() {
     let args = Args::parse();
 
-    // Set up some internal walls
-    let mut mg = MazeGenerator {
-        height: 10,
-        width: 10,
-        cell_size: 50.0,
-        friction: 0.8,
-        cells: vec![vec![CellWalls::default(); 10]; 10],
-    };
-    mg.cells[2][2].east = true;
-    mg.cells[3][2].west = true;
-    mg.cells[4][4].north = true;
-    mg.cells[4][3].south = true;
-    mg.cells[5][5].west = true;
-    mg.cells[5][5].south = true;
+    let maze = std::fs::read_to_string(args.maze).unwrap();
 
-    let mut maze: Maze = mg.into();
-    maze.start = vec2(75.0, 75.0);
-    maze.start_direction = StartDirection::Right;
+    let maze = parse_maze(&maze);
 
-    let mut sim = Simulation::new(args.path, maze); // Create a 10x10 maze
+    let mut sim = Simulation::new(args.script, maze); // Create a 10x10 maze
 
     let mut paused = true;
 
