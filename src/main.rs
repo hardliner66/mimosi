@@ -169,28 +169,11 @@ impl Sensors {
 #[derive(Clone, CustomType, Debug)]
 struct MouseData {
     #[rhai_type(readonly)]
-    wheel_base: f32, // Distance between the wheels
-    #[rhai_type(readonly)]
-    wheel_radius: f32, // Radius of the wheels
-    #[rhai_type(readonly)]
-    ticks_per_revolution: usize, // Encoder resolution (ticks per full wheel revolution)
-    #[rhai_type(readonly)]
-    max_rpm: f32, // Maximum RPM of the motor
-    #[rhai_type(readonly)]
-    motor_torque: f32, // Torque provided by the motor
-    #[rhai_type(readonly)]
-    wheel_inertia: f32, // Rotational inertia of the wheel
+    wheel_base: f32,
     #[rhai_type(readonly)]
     tire_friction: f32,
     #[rhai_type(readonly)]
     mass: f32, // Mass of the micromouse
-
-    #[rhai_type(readonly)]
-    left_encoder: usize, // Left wheel encoder tick count
-    #[rhai_type(readonly)]
-    right_encoder: usize, // Right wheel encoder tick count
-    #[rhai_type(readonly)]
-    angular_velocity: f32,
 
     #[rhai_type(readonly)]
     crashed: bool,
@@ -232,19 +215,16 @@ impl MouseData {
 
 #[derive(Serialize, Deserialize)]
 struct MouseConfig {
-    wheel_base: f32,             // Distance between the wheels
-    wheel_radius: f32,           // Radius of the wheels
-    ticks_per_revolution: usize, // Encoder resolution (ticks per full wheel revolution)
-    max_rpm: f32,                // Maximum RPM of the motor
-    motor_torque: f32,           // Torque provided by the motor
-    wheel_inertia: f32,          // Rotational inertia of the wheel
+    wheel_base: f32, // Distance between the wheels
+    wheel_radius: f32,
     tire_friction: f32,
     mass: f32, // Mass of the micromouse
+    max_speed: f32,
 
-    width: f32,           // Width of the mouse
-    length: f32,          // Length of the mouse (not including the triangle)
-    gyroscope_bias: f32,  // Bias in the gyroscope sensor (to simulate real-world imperfections)
-    gyroscope_noise: f32, // Random noise in the gyroscope sensor (to simulate real-world imperfections)
+    width: f32,  // Width of the mouse
+    length: f32, // Length of the mouse (not including the triangle)
+
+    encoder_resolution: usize,
 
     sensors: HashMap<String, Sensor>,
 }
@@ -256,40 +236,33 @@ struct Micromouse {
     sensors: HashMap<String, Sensor>,
 
     tire_friction: f32,
-    orientation: f32,            // Orientation angle in radians
-    left_encoder: usize,         // Left wheel encoder tick count
-    right_encoder: usize,        // Right wheel encoder tick count
-    left_rpm: f32,               // Current RPM of the left motor
-    right_rpm: f32,              // Current RPM of the right motor
-    wheel_base: f32,             // Distance between the wheels
-    wheel_radius: f32,           // Radius of the wheels
-    ticks_per_revolution: usize, // Encoder resolution (ticks per full wheel revolution)
-    max_rpm: f32,                // Maximum RPM of the motor
-    motor_torque: f32,           // Torque provided by the motor
-    wheel_inertia: f32,          // Rotational inertia of the wheel
+    orientation: f32, // Orientation angle in radians
+    wheel_base: f32,  // Distance between the wheels
     left_power: f32,
     right_power: f32,
-    mass: f32,            // Mass of the micromouse
-    gyroscope_bias: f32,  // Bias in the gyroscope sensor (to simulate real-world imperfections)
-    gyroscope_noise: f32, // Random noise in the gyroscope sensor (to simulate real-world imperfections)
+    left_encoder: usize,
+    right_encoder: usize,
+    encoder_resolution: usize,
+
+    wheel_radius: f32,
+    left_velocity: f32,  // Current velocity of the left wheels
+    right_velocity: f32, // Current velocity of the right wheels
+    max_speed: f32,
+    mass: f32, // Mass of the micromouse
 }
 
 impl Micromouse {
     fn new(
         MouseConfig {
             wheel_base,
+            wheel_radius,
             width,
             length,
             sensors,
-            wheel_radius,
-            ticks_per_revolution,
-            max_rpm,
-            motor_torque,
-            wheel_inertia,
             mass,
+            max_speed,
             tire_friction,
-            gyroscope_bias, // Bias in the gyroscope sensor (to simulate real-world imperfections)
-            gyroscope_noise, // Random noise in the gyroscope sensor (to simulate real-world imperfections)
+            encoder_resolution,
         }: MouseConfig,
         position: Vec2,
         orientation: f32,
@@ -300,6 +273,11 @@ impl Micromouse {
             width,
             mass,
             length,
+            max_speed,
+            wheel_radius,
+            left_encoder: 0,
+            right_encoder: 0,
+            encoder_resolution,
             sensors: sensors
                 .into_iter()
                 .map(|(n, s)| {
@@ -313,18 +291,9 @@ impl Micromouse {
                 })
                 .collect(),
             orientation,
-            wheel_radius,
-            ticks_per_revolution,
             tire_friction,
-            max_rpm,
-            motor_torque,
-            wheel_inertia,
-            gyroscope_bias,
-            gyroscope_noise,
-            left_encoder: 0,
-            right_encoder: 0,
-            left_rpm: 0.0,
-            right_rpm: 0.0,
+            left_velocity: 0.0,
+            right_velocity: 0.0,
             left_power: 0.0,
             right_power: 0.0,
         }
@@ -337,26 +306,14 @@ impl Micromouse {
             sensors,
             tire_friction,
             wheel_base,
-            wheel_radius,
-            ticks_per_revolution,
-            max_rpm,
-            motor_torque,
-            wheel_inertia,
             left_power,
             right_power,
             mass,
-            left_encoder,
-            right_encoder,
             ..
         } = &self;
         MouseData {
             delta_time,
             wheel_base: *wheel_base,
-            wheel_radius: *wheel_radius,
-            ticks_per_revolution: *ticks_per_revolution,
-            max_rpm: *max_rpm,
-            motor_torque: *motor_torque,
-            wheel_inertia: *wheel_inertia,
             tire_friction: *tire_friction,
             mass: *mass,
             width: *width,
@@ -369,24 +326,8 @@ impl Micromouse {
             ),
             left_power: *left_power,
             right_power: *right_power,
-            left_encoder: *left_encoder,
-            right_encoder: *right_encoder,
             crashed,
-            angular_velocity: self.get_gyroscope_data(),
         }
-    }
-
-    fn get_gyroscope_data(&self) -> f32 {
-        // Calculate the angular velocity (rad/s) from the difference in wheel speeds
-        let angular_velocity =
-            (self.right_rpm - self.left_rpm) / 60.0 * 2.0 * std::f32::consts::PI / self.wheel_base;
-
-        // Add gyroscope bias and noise to simulate a real gyroscope
-        let noisy_angular_velocity = angular_velocity
-            + self.gyroscope_bias
-            + (self.gyroscope_noise * ::rand::random::<f32>());
-
-        noisy_angular_velocity
     }
 
     fn set_left_power(&mut self, power: f32) {
@@ -403,75 +344,81 @@ impl Micromouse {
     }
 
     fn update(&mut self, dt: f32, maze_friction: f32) {
-        // Constants
-        let torque_constant = self.motor_torque; // Proportional constant for torque based on power
-        let max_angular_velocity = (self.max_rpm / 60.0) * 2.0 * std::f32::consts::PI;
+        // Calculate acceleration based on power input and friction
+        let left_acceleration =
+            self.calculate_acceleration(self.left_power, self.left_velocity, maze_friction);
+        let right_acceleration =
+            self.calculate_acceleration(self.right_power, self.right_velocity, maze_friction);
 
-        // Combine tire friction and maze friction
-        let combined_friction = self.tire_friction * maze_friction;
+        // Update velocities
+        self.left_velocity += left_acceleration * dt;
+        self.right_velocity += right_acceleration * dt;
 
-        // Calculate the effective torque considering combined friction and mass
-        let effective_torque = |power: f32| -> f32 {
-            let torque = power * torque_constant * combined_friction;
-            torque / self.mass // Adjust torque by mass to simulate inertia
-        };
+        // Cap velocities at max speed
+        self.left_velocity = self.left_velocity.clamp(-self.max_speed, self.max_speed);
+        self.right_velocity = self.right_velocity.clamp(-self.max_speed, self.max_speed);
 
-        // Calculate torque applied by each motor
-        let left_torque = effective_torque(self.left_power);
-        let right_torque = effective_torque(self.right_power);
+        // Calculate average speed and turning rate
+        let average_velocity = (self.left_velocity + self.right_velocity) / 2.0;
+        let turning_rate = (self.left_velocity - self.right_velocity) / self.wheel_base;
 
-        // Calculate angular acceleration for each wheel considering inertia
-        let left_angular_acceleration = left_torque / self.wheel_inertia;
-        let right_angular_acceleration = right_torque / self.wheel_inertia;
+        // Update orientation and position
+        self.orientation += turning_rate * dt;
+        self.position.x += average_velocity * self.orientation.cos() * dt;
+        self.position.y += average_velocity * self.orientation.sin() * dt;
 
-        // Update RPM based on angular acceleration and delta time
-        self.left_rpm += left_angular_acceleration * dt * 60.0 / (2.0 * std::f32::consts::PI);
-        self.right_rpm += right_angular_acceleration * dt * 60.0 / (2.0 * std::f32::consts::PI);
+        self.update_wheel_encoders(dt);
 
-        // Clamp RPM to max RPM
-        self.left_rpm = self.left_rpm.clamp(-self.max_rpm, self.max_rpm);
-        self.right_rpm = self.right_rpm.clamp(-self.max_rpm, self.max_rpm);
+        // Apply friction to slow down
+        self.apply_friction(dt, maze_friction);
+    }
 
-        // Calculate actual angular velocity considering the clamped RPM
-        let left_angular_velocity = (self.left_rpm / 60.0) * 2.0 * std::f32::consts::PI;
-        let right_angular_velocity = (self.right_rpm / 60.0) * 2.0 * std::f32::consts::PI;
+    fn calculate_acceleration(&self, power: f32, current_velocity: f32, maze_friction: f32) -> f32 {
+        // Force applied by the motor (simple model: power * max force)
+        let motor_force = power * self.max_speed;
 
-        // Ensure the angular velocity does not exceed max_angular_velocity
-        let left_angular_velocity =
-            left_angular_velocity.clamp(-max_angular_velocity, max_angular_velocity);
-        let right_angular_velocity =
-            right_angular_velocity.clamp(-max_angular_velocity, max_angular_velocity);
+        // Frictional force
+        let friction_force = (self.tire_friction + maze_friction) * current_velocity.abs();
 
-        // Calculate the linear speeds of the wheels considering combined friction
-        let left_speed = left_angular_velocity * self.wheel_radius * combined_friction;
-        let right_speed = right_angular_velocity * self.wheel_radius * combined_friction;
+        // Net force = motor force - frictional force
+        let net_force = motor_force - friction_force.copysign(motor_force);
 
-        // Calculate the distance each wheel has traveled in this time step
-        let left_distance = left_speed * dt;
-        let right_distance = right_speed * dt;
+        // Acceleration = net force / mass
+        net_force / self.mass
+    }
 
-        // Calculate the change in orientation
-        let delta_orientation = (left_distance - right_distance) / self.wheel_base;
+    fn apply_friction(&mut self, dt: f32, maze_friction: f32) {
+        // Reduce the wheel velocities due to friction
+        let friction_force = self.tire_friction + maze_friction;
 
-        // Update orientation
-        self.orientation += delta_orientation;
+        self.left_velocity -= self.left_velocity * friction_force * dt;
+        self.right_velocity -= self.right_velocity * friction_force * dt;
 
-        // Calculate the average distance traveled by the micromouse
-        let distance = (left_distance + right_distance) / 2.0;
+        // Clamp small velocities to zero to simulate stopping due to friction
+        if self.left_velocity.abs() < 0.001 {
+            self.left_velocity = 0.0;
+        }
+        if self.right_velocity.abs() < 0.001 {
+            self.right_velocity = 0.0;
+        }
+    }
 
-        // Update position considering the orientation
-        self.position.x += distance * self.orientation.cos();
-        self.position.y += distance * self.orientation.sin();
+    fn update_wheel_encoders(&mut self, dt: f32) {
+        // Calculate the distance each wheel has traveled
+        let left_distance = self.left_velocity * dt;
+        let right_distance = self.right_velocity * dt;
 
-        // Convert distance traveled to encoder ticks
-        let left_ticks = (left_distance / (2.0 * std::f32::consts::PI * self.wheel_radius)
-            * self.ticks_per_revolution as f32) as usize;
-        let right_ticks = (right_distance / (2.0 * std::f32::consts::PI * self.wheel_radius)
-            * self.ticks_per_revolution as f32) as usize;
+        // Calculate the number of rotations for each wheel
+        let left_rotations = left_distance / (2.0 * std::f32::consts::PI * self.wheel_radius);
+        let right_rotations = right_distance / (2.0 * std::f32::consts::PI * self.wheel_radius);
 
-        // Update encoder counts
-        self.left_encoder += left_ticks;
-        self.right_encoder += right_ticks;
+        // Convert rotations to encoder ticks
+        let left_ticks = left_rotations * self.encoder_resolution as f32;
+        let right_ticks = right_rotations * self.encoder_resolution as f32;
+
+        // Accumulate ticks
+        self.left_encoder += left_ticks as usize;
+        self.right_encoder += right_ticks as usize;
     }
 }
 

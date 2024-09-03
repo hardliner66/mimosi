@@ -1,15 +1,11 @@
 wheel_base = 25.0
 wheel_radius = 5.0
-ticks_per_revolution = 360
-max_rpm = 300.0
-motor_torque = 1.0
-wheel_inertia = 0.01
+encoder_resolution = 360
+max_speed = 300.0
 tire_friction = 0.8
 mass = 1.0
 width = 15.0
 length = 25.0
-gyroscope_bias= 0.01  # Small bias in rad/s
-gyroscope_noise= 0.005 # Random noise in rad/s
 
 [sensors.FRONT_RIGHT]
 angle = 45.0
