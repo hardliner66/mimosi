@@ -63,9 +63,13 @@ impl FromStr for Maze {
         let mut finish = Rectangle::default();
 
         for line in s.lines() {
+            if line.trim().starts_with("#") {
+                continue;
+            }
             if let Some((left, right)) = line.split_once(":") {
                 let left = left.trim().to_uppercase();
                 match left.as_str() {
+                    "#" => (),
                     "SP" => {
                         if let Some((left, right)) = right.split_once(",") {
                             start = vec2(left.trim().parse().unwrap(), right.parse().unwrap())

@@ -1,7 +1,16 @@
+# Start Point: 0,0 (top left)
 SP: 0,0
+
+# Start Direction: Right
 SD: R
+
+# Finish: Position 7,7; size 2 Cells
 FI: 7,7; 2
+
+# Friction
 FR: 0.8
+
+# Rows
 .R0: 0-16
 .R1: 0-2, 3-15
 .R2: 1-14
@@ -19,6 +28,8 @@ FR: 0.8
 .R14: 2-3, 4-5, 6-7, 8-10
 .R15: 1-14
 .R16: 0-16
+
+# Columns
 .C0: 0-16
 .C1: 2-15
 .C2: 3-6, 8-11, 12-13
@@ -36,4 +47,3 @@ FR: 0.8
 .C14: 2-10, 11-15
 .C15: 1-15
 .C16: 0-16
-

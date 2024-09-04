@@ -82,7 +82,6 @@ pub struct Simulation {
     pub collided: bool,
     pub finished: bool,
     pub maze: Maze,
-    pub time_scale: f32, // Speed factor for the simulation and replay
     pub ast: AST,
 }
 
@@ -104,16 +103,13 @@ impl Simulation {
             collided: false,
             finished: false,
             maze,
-            time_scale: 1.0,
             engine,
             ast,
         }
     }
 
     pub fn update(&mut self, dt: f32) {
-        let dt_scaled = dt * self.time_scale;
-
-        self.mouse.update(dt_scaled, self.maze.friction);
+        self.mouse.update(dt, self.maze.friction);
 
         for sensor in self.mouse.sensors.values_mut() {
             let p = self.mouse.position

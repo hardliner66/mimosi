@@ -26,6 +26,13 @@ For now its important that the scripts can be run without posing a risk to the p
     - Offset from Mouse
     - Angle
 
+## Try it yourself
+```sh
+git clone https://github.com/hardliner66/mimosi
+cd mimosi
+cargo run -- simulate test_data/example.maze test_data/mouse.toml test_data/test.rhai
+```
+
 ## Rhai API
 
 The mouse is controlled through a single variable called `mouse`.
@@ -104,6 +111,20 @@ struct SensorInfo {
 
 Check out [test_data/test.rhai](./test_data/test.rhai) for an example on how to use the API.
 Check out the [Rhai Book](https://rhai.rs/book/) to learn more about rhai.
+
+## Maze Text Format
+| Key                     | Description                                                                                   |
+| ----------------------- | --------------------------------------------------------------------------------------------- |
+| SP                      | Starting Point. Which cell the mouse starts in. Format: x, y                                  |
+| SD                      | Starting Direction. Which direction the mouse should face to start. Can be one of: R, L, U, D |
+| FI                      | Finish. Where the finish should be placed. Format: x,y; size                                  |
+| FR                      | Maze Friction.                                                                                |
+| .R followed by a number | Defines walls in the row with the number after .R                                             |
+| .C followed by a number | Defines walls in the column with the number after .C                                          |
+
+Lines without `:` and lines starting with a `#` are ignored.
+
+For an example see: [test_data/example.maze](./test_data/example.maze)
 
 ## Planned features
 - WASM plugins

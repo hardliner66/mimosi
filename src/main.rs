@@ -65,13 +65,6 @@ async fn main() -> anyhow::Result<()> {
                 // Render the simulation
                 sim.render();
 
-                // Control the simulation speed (Q to slow down, E to speed up)
-                if is_key_pressed(KeyCode::Q) {
-                    sim.time_scale = (sim.time_scale * 0.9).max(0.1);
-                } else if is_key_pressed(KeyCode::E) {
-                    sim.time_scale = (sim.time_scale * 1.1).min(10.0);
-                }
-
                 // Exit the simulation with ESC
                 if is_key_pressed(KeyCode::Escape) {
                     break;
