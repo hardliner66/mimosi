@@ -1,6 +1,8 @@
-use std::path::Path;
-
-use macroquad::prelude::*;
+use notan::draw::*;
+use notan::{
+    app::Color,
+    math::{vec2, Vec2},
+};
 use rhai::{Engine, AST};
 
 use crate::{
@@ -86,9 +88,9 @@ pub struct Simulation {
 }
 
 impl Simulation {
-    pub fn new<P: AsRef<Path>>(script: P, maze: Maze, mouse_config: MouseConfig) -> Self {
+    pub fn new(script: String, maze: Maze, mouse_config: MouseConfig) -> Self {
         let engine = build_engine();
-        let ast = engine.compile_file(script.as_ref().to_path_buf()).unwrap();
+        let ast = engine.compile(script).unwrap();
         Self {
             mouse: Micromouse::new(
                 mouse_config,
@@ -178,63 +180,56 @@ impl Simulation {
         false
     }
 
-    pub fn render(&self) {
-        clear_background(LIGHTGRAY);
+    pub fn render(&self, draw: &mut Draw) {
+        draw.clear(Color::GRAY);
 
         // Render the maze with internal and outside walls
-        self.render_maze();
+        self.render_maze(draw);
 
         // Render the mouse
-        self.render_mouse();
+        self.render_mouse(draw);
     }
 
-    fn render_maze(&self) {
+    fn render_maze(&self, draw: &mut Draw) {
         for wall in &self.maze.walls {
-            draw_line(
-                wall.p1.x + 5.0,
-                wall.p1.y + 5.0,
-                wall.p2.x + 5.0,
-                wall.p2.y + 5.0,
-                1.0,
-                BLACK,
-            );
-            draw_line(
-                wall.p2.x + 5.0,
-                wall.p2.y + 5.0,
-                wall.p3.x + 5.0,
-                wall.p3.y + 5.0,
-                1.0,
-                BLACK,
-            );
-            draw_line(
-                wall.p3.x + 5.0,
-                wall.p3.y + 5.0,
-                wall.p4.x + 5.0,
-                wall.p4.y + 5.0,
-                1.0,
-                BLACK,
-            );
-            draw_line(
-                wall.p4.x + 5.0,
-                wall.p4.y + 5.0,
-                wall.p1.x + 5.0,
-                wall.p1.y + 5.0,
-                1.0,
-                BLACK,
-            );
+            draw.line(
+                (wall.p1.x + 5.0, wall.p1.y + 5.0),
+                (wall.p2.x + 5.0, wall.p2.y + 5.0),
+            )
+            .color(Color::BLACK)
+            .width(1.0);
+            draw.line(
+                (wall.p2.x + 5.0, wall.p2.y + 5.0),
+                (wall.p3.x + 5.0, wall.p3.y + 5.0),
+            )
+            .color(Color::BLACK)
+            .width(1.0);
+            draw.line(
+                (wall.p3.x + 5.0, wall.p3.y + 5.0),
+                (wall.p4.x + 5.0, wall.p4.y + 5.0),
+            )
+            .color(Color::BLACK)
+            .width(1.0);
+            draw.line(
+                (wall.p4.x + 5.0, wall.p4.y + 5.0),
+                (wall.p1.x + 5.0, wall.p1.y + 5.0),
+            )
+            .color(Color::BLACK)
+            .width(1.0);
 
-            draw_rectangle_lines(
-                self.maze.finish.p1.x + 5.0,
-                self.maze.finish.p1.y + 5.0,
-                self.maze.finish.p3.x - self.maze.finish.p1.x,
-                self.maze.finish.p3.y - self.maze.finish.p1.y,
-                2.0,
-                GREEN,
-            );
+            draw.rect(
+                (self.maze.finish.p1.x + 5.0, self.maze.finish.p1.y + 5.0),
+                (
+                    self.maze.finish.p3.x - self.maze.finish.p1.x,
+                    self.maze.finish.p3.y - self.maze.finish.p1.y,
+                ),
+            )
+            .color(Color::GREEN)
+            .stroke(2.0);
         }
     }
 
-    fn render_mouse(&self) {
+    fn render_mouse(&self, draw: &mut Draw) {
         let offset = vec2(5.0, 5.0);
         let mouse = &self.mouse;
         let half_width = mouse.width / 2.0;
@@ -253,26 +248,26 @@ impl Simulation {
             + vec2(half_length + half_width, 0.0).rotate(Vec2::from_angle(mouse.orientation));
 
         // Draw the rectangle part of the mouse
-        draw_triangle(
-            rear_left + offset,
-            rear_right + offset,
-            front_right + offset,
-            RED,
-        );
-        draw_triangle(
-            rear_left + offset,
-            front_left + offset,
-            front_right + offset,
-            RED,
-        );
+        draw.triangle(
+            (rear_left + offset).into(),
+            (rear_right + offset).into(),
+            (front_right + offset).into(),
+        )
+        .color(Color::RED);
+        draw.triangle(
+            (rear_left + offset).into(),
+            (front_left + offset).into(),
+            (front_right + offset).into(),
+        )
+        .color(Color::RED);
 
         // Draw the triangular front
-        draw_triangle(
-            front_left + offset,
-            front_right + offset,
-            front_center + offset,
-            BLUE,
-        );
+        draw.triangle(
+            (front_left + offset).into(),
+            (front_right + offset).into(),
+            (front_center + offset).into(),
+        )
+        .color(Color::BLUE);
 
         for sensor in self.mouse.sensors.values() {
             let p1 = self.mouse.position
@@ -280,50 +275,37 @@ impl Simulation {
                     .position_offset
                     .rotate(Vec2::from_angle(mouse.orientation));
             let p2 = sensor.closest_point;
-            draw_line(
-                p1.x + 5.0,
-                p1.y + 5.0,
-                p2.x + 5.0,
-                p2.y + 5.0,
-                2.0,
-                DARKPURPLE,
-            );
+            draw.line((p1.x + 5.0, p1.y + 5.0), (p2.x + 5.0, p2.y + 5.0))
+                .width(2.0)
+                .color(Color::PURPLE);
         }
 
         if self.collided {
-            draw_line(
-                rear_left.x + 5.0,
-                rear_left.y + 5.0,
-                front_right.x + 5.0,
-                front_right.y + 5.0,
-                2.0,
-                BLACK,
-            );
-            draw_line(
-                rear_right.x + 5.0,
-                rear_right.y + 5.0,
-                front_left.x + 5.0,
-                front_left.y + 5.0,
-                2.0,
-                BLACK,
-            );
+            draw.line(
+                (rear_left.x + 5.0, rear_left.y + 5.0),
+                (front_right.x + 5.0, front_right.y + 5.0),
+            )
+            .width(2.0)
+            .color(Color::BLACK);
+            draw.line(
+                (rear_right.x + 5.0, rear_right.y + 5.0),
+                (front_left.x + 5.0, front_left.y + 5.0),
+            )
+            .width(2.0)
+            .color(Color::BLACK);
         } else if self.finished {
-            draw_line(
-                rear_left.x + 5.0,
-                rear_left.y + 5.0,
-                front_right.x + 5.0,
-                front_right.y + 5.0,
-                2.0,
-                GREEN,
-            );
-            draw_line(
-                rear_right.x + 5.0,
-                rear_right.y + 5.0,
-                front_left.x + 5.0,
-                front_left.y + 5.0,
-                2.0,
-                GREEN,
-            );
+            draw.line(
+                (rear_left.x + 5.0, rear_left.y + 5.0),
+                (front_right.x + 5.0, front_right.y + 5.0),
+            )
+            .width(2.0)
+            .color(Color::GREEN);
+            draw.line(
+                (rear_right.x + 5.0, rear_right.y + 5.0),
+                (front_left.x + 5.0, front_left.y + 5.0),
+            )
+            .width(2.0)
+            .color(Color::GREEN);
         }
     }
 }

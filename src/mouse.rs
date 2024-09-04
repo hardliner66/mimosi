@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use macroquad::math::Vec2;
+use notan::math::Vec2;
 use serde::{Deserialize, Serialize};
 
 use crate::{

@@ -1,4 +1,4 @@
-use macroquad::math::Vec2;
+use notan::math::Vec2;
 use serde::{Deserialize, Serialize};
 
 pub const RIGHT: f32 = 0.0;

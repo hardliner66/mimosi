@@ -1,6 +1,6 @@
 use std::{ops::Deref, str::FromStr};
 
-use macroquad::math::{vec2, Vec2};
+use notan::math::{vec2, Vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::helper::Vec2Def;

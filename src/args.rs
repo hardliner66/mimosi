@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 pub struct Args {
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Subcommand, Clone)]
@@ -14,8 +14,11 @@ pub enum Command {
     ExampleMaze,
     ExampleScript,
     Simulate {
-        maze: PathBuf,
-        mouse: PathBuf,
-        script: PathBuf,
+        #[arg(long)]
+        maze: Option<PathBuf>,
+        #[arg(long)]
+        mouse: Option<PathBuf>,
+        #[arg(long)]
+        script: Option<PathBuf>,
     },
 }
