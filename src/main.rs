@@ -14,13 +14,9 @@ use rhai::{
 use serde::{Deserialize, Serialize};
 
 const RIGHT: f32 = 0.0;
-// const UP_RIGHT: f32 = std::f32::consts::FRAC_PI_4;
 const UP: f32 = std::f32::consts::FRAC_PI_2;
-// const UP_LEFT: f32 = UP + std::f32::consts::FRAC_PI_4;
 const LEFT: f32 = std::f32::consts::PI;
-// const DOWN_LEFT: f32 = LEFT + std::f32::consts::FRAC_PI_4;
 const DOWN: f32 = 3.0 * std::f32::consts::FRAC_PI_2;
-// const DOWN_RIGHT: f32 = DOWN + std::f32::consts::FRAC_PI_4;
 
 pub fn build_engine() -> Engine {
     let mut engine = Engine::new();
@@ -67,14 +63,14 @@ impl Ray {
 
             let denom = self.direction.dot(perp_wall_dir);
 
-            if denom.abs() < std::f32::EPSILON {
+            if denom.abs() < f32::EPSILON {
                 continue;
             }
 
             let t1 = ray_to_wall_start.dot(perp_wall_dir) / denom;
             let t2 = ray_to_wall_start.dot(self.direction.perp()) / denom;
 
-            if t1 >= 0.0 && t2 >= 0.0 && t2 <= 1.0 {
+            if t1 >= 0.0 && (0.0..=1.0).contains(&t2) {
                 found = Some(Vec2 {
                     x: self.origin.x + t1 * self.direction.x,
                     y: self.origin.y + t1 * self.direction.y,
@@ -187,6 +183,11 @@ struct MouseData {
     length: f32, // Length of the mouse (not including the triangle)
     #[rhai_type(readonly)]
     sensors: Sensors,
+
+    #[rhai_type(readonly)]
+    left_encoder: usize,
+    #[rhai_type(readonly)]
+    right_encoder: usize,
 
     #[rhai_type(set=MouseData::set_left_power, get=MouseData::get_left_power)]
     left_power: f32,
@@ -308,6 +309,8 @@ impl Micromouse {
             wheel_base,
             left_power,
             right_power,
+            left_encoder,
+            right_encoder,
             mass,
             ..
         } = &self;
@@ -324,6 +327,8 @@ impl Micromouse {
                     .map(|(n, v)| (n.clone(), SensorInfo::from(v)))
                     .collect(),
             ),
+            left_encoder: *left_encoder,
+            right_encoder: *right_encoder,
             left_power: *left_power,
             right_power: *right_power,
             crashed,
@@ -580,7 +585,7 @@ impl Simulation {
 
         self.mouse.update(dt_scaled, self.maze.friction);
 
-        for (_, sensor) in &mut self.mouse.sensors {
+        for sensor in self.mouse.sensors.values_mut() {
             let p = self.mouse.position
                 + sensor
                     .position_offset
@@ -644,7 +649,7 @@ impl Simulation {
                 return true;
             }
         }
-        return false;
+        false
     }
 
     fn render(&self) {
@@ -743,7 +748,7 @@ impl Simulation {
             BLUE,
         );
 
-        for (_, sensor) in &self.mouse.sensors {
+        for sensor in self.mouse.sensors.values() {
             let p1 = self.mouse.position
                 + sensor
                     .position_offset
@@ -866,8 +871,8 @@ fn parse_maze(s: &str) -> Maze {
                     friction = right.trim().parse().unwrap();
                 }
                 _ => {
-                    if left.starts_with(".R") {
-                        let row: f32 = left[2..].parse().unwrap();
+                    if let Some(left) = left.strip_prefix(".R") {
+                        let row: f32 = left.parse().unwrap();
                         for (min, max) in right.split(",").flat_map(|s| {
                             if let Some((left, right)) = s.split_once("-") {
                                 Some((
@@ -888,8 +893,8 @@ fn parse_maze(s: &str) -> Maze {
                                 .into(),
                             );
                         }
-                    } else if left.starts_with(".C") {
-                        let col: f32 = left[2..].parse().unwrap();
+                    } else if let Some(left) = left.strip_prefix(".C") {
+                        let col: f32 = left.parse().unwrap();
                         for (min, max) in right.split(",").flat_map(|s| {
                             if let Some((left, right)) = s.split_once("-") {
                                 Some((
