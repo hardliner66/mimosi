@@ -18,3 +18,4 @@ serde_json = { version = "1.0.127", features = ["preserve_order"] }
 rand = { version = "0.8.5", features = ["serde"] }
 clap = { version = "4.5.16", features = ["derive"] }
 toml = { version = "0.8.19", features = ["preserve_order"] }
+anyhow = "1.0.86"

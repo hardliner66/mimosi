@@ -1,4 +1,5 @@
 debug(mouse);
+
 // Extract the sensor data from the mouse
 let front_sensor = mouse.sensors["FRONT"];  // Sensor at the front
 let left_diagonal_sensor = mouse.sensors["FRONT_LEFT"];  // Diagonal sensor on the left
