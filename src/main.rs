@@ -32,13 +32,13 @@ fn read_with_defaults(
     script: Option<PathBuf>,
 ) -> anyhow::Result<(String, String, String)> {
     Ok((
-        maze.map(|p| std::fs::read_to_string(p))
+        maze.map(std::fs::read_to_string)
             .unwrap_or_else(|| Ok(s!(DEFAULT_MAZE)))?,
         mouse
-            .map(|p| std::fs::read_to_string(p))
+            .map(std::fs::read_to_string)
             .unwrap_or_else(|| Ok(s!(DEFAULT_MOUSE)))?,
         script
-            .map(|p| std::fs::read_to_string(p))
+            .map(std::fs::read_to_string)
             .unwrap_or_else(|| Ok(s!(DEFAULT_SCRIPT)))?,
     ))
 }
@@ -93,7 +93,7 @@ fn draw(_app: &mut App, gfx: &mut Graphics, plugins: &mut Plugins, state: &mut S
         ctx.input(|i| {
             for f in &i.raw.dropped_files {
                 if let Some(bytes) = &f.bytes {
-                    let s = String::from_utf8_lossy(&bytes).to_string();
+                    let s = String::from_utf8_lossy(bytes).to_string();
                     if let Ok(config) = toml::from_str::<MouseConfig>(&s) {
                         state.sim.mouse = Micromouse::new(
                             config,
@@ -167,7 +167,7 @@ struct State<'a> {
 fn main() -> Result<(), String> {
     let args = Args::parse();
 
-    match args.command.unwrap_or_else(|| Command::Simulate {
+    match args.command.unwrap_or(Command::Simulate {
         maze: None,
         mouse: None,
         script: None,
