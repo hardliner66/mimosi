@@ -2,6 +2,9 @@
 name = "mazeparser"
 version = "0.1.0"
 edition = "2021"
+description = "A custom format for defining mazes!"
+license-file = "LICENSE"
+repository = "https://github.com/hardliner66/mimosi"
 
 [dependencies]
 serde = { version = "1.0.209", features = ["derive"] }
