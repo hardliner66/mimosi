@@ -17,4 +17,4 @@ serde = { version = "1.0.209", features = ["derive"] }
 toml = { version = "0.8.19", features = ["preserve_order"] }
 anyhow = "1.0.86"
 stringlit = "2.1.0"
-mazeparser = { path = "crates/mazeparser" }
+mazeparser = { version = "0.1.0", path = "crates/mazeparser" }
