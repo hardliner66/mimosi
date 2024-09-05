@@ -5,7 +5,7 @@ SP: 0,0
 SD: R
 
 # Finish: Position 7,7; size 2 Cells
-FI: 7,7; 2
+FI: 7,7;9,9
 
 # Friction
 FR: 0.8

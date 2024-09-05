@@ -7,7 +7,7 @@ use notan::draw::*;
 use notan::egui::{self, *};
 use notan::prelude::*;
 
-use std::{fmt::Display, path::PathBuf, str::FromStr};
+use std::{fmt::Display, path::PathBuf};
 
 use args::{Args, Command};
 use rhai::{Dynamic, Scope};
@@ -102,7 +102,7 @@ fn draw(_app: &mut App, gfx: &mut Graphics, plugins: &mut Plugins, state: &mut S
                         );
                     } else if let Ok(ast) = state.sim.engine.compile(&s) {
                         state.sim.ast = ast;
-                    } else if let Ok(maze) = Maze::from_str(&s) {
+                    } else if let Ok(maze) = Maze::from_string(&s, 50.0) {
                         state.sim.maze = maze;
                     }
                 }
@@ -182,7 +182,7 @@ fn main() -> Result<(), String> {
         } => {
             let (maze, mouse, script) =
                 read_with_defaults(maze, mouse, script).map_err(|e| format!("{e}"))?;
-            let maze: Maze = maze.parse()?;
+            let maze = Maze::from_string(&maze, 50.0)?;
 
             let mouse_config: MouseConfig = toml::from_str(&mouse).unwrap();
 
