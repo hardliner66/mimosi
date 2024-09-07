@@ -41,14 +41,15 @@ impl Maze {
     pub fn from_string(s: &str, cell_size: f32) -> Result<Maze, String> {
         let maze = mazeparser::Maze::from_str(s)?;
         let mut walls = Vec::new();
+        const WALL_THICKNESS: f32 = 1.0;
         for wall in maze.walls {
             if let mazeparser::Orientation::Vertical = wall.orientation {
                 walls.push(
                     Rectangle {
                         p1: wall.start * cell_size,
                         p2: wall.end * cell_size,
-                        p3: wall.end * cell_size + vec2(0.0, -1.0),
-                        p4: wall.start * cell_size + vec2(0.0, -1.0),
+                        p3: wall.end * cell_size + vec2(WALL_THICKNESS, 0.0),
+                        p4: wall.start * cell_size + vec2(WALL_THICKNESS, 0.0),
                     }
                     .into(),
                 );
@@ -57,8 +58,8 @@ impl Maze {
                     Rectangle {
                         p1: wall.start * cell_size,
                         p2: wall.end * cell_size,
-                        p3: wall.end * cell_size + vec2(-1.0, 0.0),
-                        p4: wall.start * cell_size + vec2(-1.0, 0.0),
+                        p3: wall.end * cell_size + vec2(0.0, WALL_THICKNESS),
+                        p4: wall.start * cell_size + vec2(0.0, WALL_THICKNESS),
                     }
                     .into(),
                 );
